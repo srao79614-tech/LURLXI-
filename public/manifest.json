@@ -1,0 +1,56 @@
+{
+  "id": "/",
+  "name": "LURL — Executive Business Intelligence",
+  "short_name": "LURL",
+  "description": "Executive business intelligence platform for Trading, AI Dropshipping, E-commerce, AI Startups, and Skill Development.",
+  "start_url": "/?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "theme_color": "#090b10",
+  "background_color": "#090b10",
+  "lang": "en",
+  "dir": "ltr",
+  "categories": ["business", "finance", "productivity", "education"],
+  "icons": [
+    {
+      "src": "/pwa-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-maskable-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Live Trading Terminal",
+      "short_name": "Trading",
+      "description": "Open real-time BTC trading simulator and live market terminal",
+      "url": "/?source=shortcut-trading",
+      "icons": [{ "src": "/pwa-192x192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Executive Codex",
+      "short_name": "Codex",
+      "description": "Browse executive intelligence modules and business guides",
+      "url": "/?source=shortcut-codex",
+      "icons": [{ "src": "/pwa-192x192.png", "sizes": "192x192" }]
+    }
+  ],
+  "admob_app_id": "ca-app-pub-3767067209003943~6726537867",
+  "admob_ad_units": [
+    "ca-app-pub-3767067209003943/2800569440",
+    "ca-app-pub-3767067209003943/1431647456"
+  ]
+}

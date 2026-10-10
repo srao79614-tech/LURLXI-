@@ -1,0 +1,6 @@
+{
+  "name": "LURL",
+  "description": "Executive business intelligence platform for Trading, AI Dropshipping, E-commerce, AI Startups, and Skill Development with 3D animation, self-adapting Gemini AI, VIP portal, and real-time Share Thoughts network.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

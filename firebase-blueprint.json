@@ -1,0 +1,225 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile records containing account preferences, role, and verification status",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Firebase Auth user ID",
+          "maxLength": 128
+        },
+        "email": {
+          "type": "string",
+          "description": "User email address",
+          "maxLength": 256
+        },
+        "name": {
+          "type": "string",
+          "description": "Display name of the user",
+          "maxLength": 100
+        },
+        "selectedCategory": {
+          "type": "string",
+          "description": "Currently active educational track",
+          "maxLength": 64
+        },
+        "avatarUrl": {
+          "type": "string",
+          "description": "Avatar image URL",
+          "maxLength": 1024
+        },
+        "isVip": {
+          "type": "boolean",
+          "description": "VIP status flag"
+        },
+        "role": {
+          "type": "string",
+          "description": "Assigned executive role",
+          "maxLength": 64
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last update timestamp"
+        }
+      },
+      "required": ["uid", "email", "name"]
+    },
+    "Performance": {
+      "title": "Performance",
+      "description": "Curriculum course progress and knowledge mastery scores",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "overallMastery": {
+          "type": "number",
+          "description": "Overall curriculum mastery index (0-100)"
+        },
+        "totalMinutes": {
+          "type": "number",
+          "description": "Total study minutes logged"
+        },
+        "lastActive": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["userId", "overallMastery"]
+    },
+    "Trade": {
+      "title": "Trade",
+      "description": "Simulated trading log entry for Bitcoin demo and backtesting",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "userId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "symbol": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "side": {
+          "type": "string",
+          "enum": ["BUY", "SELL"]
+        },
+        "entryPrice": {
+          "type": "number"
+        },
+        "exitPrice": {
+          "type": "number"
+        },
+        "amount": {
+          "type": "number"
+        },
+        "pnl": {
+          "type": "number"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["OPEN", "CLOSED"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "userId", "symbol", "side", "entryPrice"]
+    },
+    "WorldwideMessage": {
+      "title": "WorldwideMessage",
+      "description": "Public community chat message sent by verified members",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "userId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "senderName": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "senderEmail": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "category": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "userId", "senderName", "text"]
+    },
+    "ThoughtPost": {
+      "title": "ThoughtPost",
+      "description": "Shared community post and market perspective",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "userId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "authorName": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "authorEmail": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 2500
+        },
+        "category": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "likes": {
+          "type": "number"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "userId", "authorName", "title", "text"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "User profile records containing account preferences and identity"
+    },
+    "/users/{userId}/performance/{perfId}": {
+      "schema": { "$ref": "#/entities/Performance" },
+      "description": "User curriculum progress and mastery metrics"
+    },
+    "/users/{userId}/trades/{tradeId}": {
+      "schema": { "$ref": "#/entities/Trade" },
+      "description": "Simulated trading records and backtesting executions"
+    },
+    "/worldwideChat/{messageId}": {
+      "schema": { "$ref": "#/entities/WorldwideMessage" },
+      "description": "Global worldwide real-time community chat messages"
+    },
+    "/thoughtPosts/{postId}": {
+      "schema": { "$ref": "#/entities/ThoughtPost" },
+      "description": "Community posts and strategic thoughts"
+    }
+  }
+}
