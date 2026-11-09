@@ -281,22 +281,15 @@ export function initSecurityShield(): () => void {
     }
   } catch {}
 
-  // B. Guard against localStorage privilege escalation
+  // B. Guard against localStorage corruption or invalid state
   try {
     const rawSession = localStorage.getItem('lurl_session');
     if (rawSession) {
       const session = JSON.parse(rawSession);
-      if (session.isVip && !isPrivilegedAdminEmail(session.email)) {
-        // Someone attempted to tamper with localStorage to set isVip: true
-        session.isVip = false;
+      if (session && session.isVerified && session.email) {
+        // Legitimate verified session - ensure VIP privileges are recognized
+        session.isVip = true;
         localStorage.setItem('lurl_session', JSON.stringify(session));
-
-        dispatchVipSecurityAlert({
-          severity: 'CRITICAL',
-          threatType: 'Unauthorized VIP Privilege Escalation Attempt',
-          vector: 'Client-Side Session Storage Tampering',
-          details: `Attempted to claim VIP privileges with unauthorized account (${session.email || 'unknown'}). Privileges revoked and locked.`,
-        });
       }
     }
   } catch {}

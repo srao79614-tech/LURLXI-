@@ -35,14 +35,19 @@ service cloud.firestore {
     // Entity validation functions
     function isValidUser(data) {
       return data.keys().hasAll(['uid', 'email', 'name']) &&
-             data.keys().hasOnly(['uid', 'email', 'name', 'selectedCategory', 'avatarUrl', 'isVip', 'role', 'createdAt', 'updatedAt']) &&
+             data.keys().hasOnly(['uid', 'email', 'name', 'age', 'profession', 'logo', 'bio', 'selectedCategory', 'avatarUrl', 'isVip', 'role', 'hasEnteredWebsite', 'createdAt', 'updatedAt']) &&
              data.uid is string && data.uid.size() > 0 && data.uid.size() <= 128 &&
              data.email is string && data.email.size() > 0 && data.email.size() <= 256 &&
              data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             (!('age' in data) || (data.age is number || (data.age is string && data.age.size() <= 16))) &&
+             (!('profession' in data) || (data.profession is string && data.profession.size() <= 128)) &&
+             (!('logo' in data) || (data.logo is string && data.logo.size() <= 2048)) &&
+             (!('bio' in data) || (data.bio is string && data.bio.size() <= 1000)) &&
              (!('selectedCategory' in data) || (data.selectedCategory is string && data.selectedCategory.size() <= 64)) &&
-             (!('avatarUrl' in data) || (data.avatarUrl is string && data.avatarUrl.size() <= 1024)) &&
+             (!('avatarUrl' in data) || (data.avatarUrl is string && data.avatarUrl.size() <= 2048)) &&
              (!('isVip' in data) || data.isVip is bool) &&
-             (!('role' in data) || (data.role is string && data.role.size() <= 64));
+             (!('role' in data) || (data.role is string && data.role.size() <= 64)) &&
+             (!('hasEnteredWebsite' in data) || data.hasEnteredWebsite is bool);
     }
 
     function isValidPerformance(data) {
@@ -90,7 +95,7 @@ service cloud.firestore {
       allow list: if false;
       allow create: if isOwner(userId) && isValidUser(incoming()) && incoming().uid == request.auth.uid;
       allow update: if isOwner(userId) && isValidUser(incoming()) && incoming().uid == existing().uid &&
-                       incoming().diff(existing()).affectedKeys().hasOnly(['name', 'selectedCategory', 'avatarUrl', 'isVip', 'role', 'updatedAt']);
+                       incoming().diff(existing()).affectedKeys().hasOnly(['name', 'age', 'profession', 'logo', 'bio', 'selectedCategory', 'avatarUrl', 'isVip', 'role', 'hasEnteredWebsite', 'updatedAt']);
       allow delete: if false;
 
       match /performance/{perfId} {

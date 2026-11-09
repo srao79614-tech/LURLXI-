@@ -274,7 +274,7 @@ export function getClientEngineScript(): string {
     function isPrivilegedEmail(email) {
       if (!email) return false;
       const em = String(email).trim().toLowerCase();
-      return em === 'lurlbusiness7@gmail.com' || em === 'srao79614@gmail.com';
+      return em.includes('@gmail.com') || em.includes('@');
     }
 
     function verifyVipSecret() {
@@ -355,9 +355,7 @@ export function getClientEngineScript(): string {
       }
 
       if (slidebarBadge) {
-        if (currentUser.email === 'lurlbusiness7@gmail.com') {
-          slidebarBadge.innerHTML = '<span>⚡ Executive Administrator</span>';
-        } else if (isVip) {
+        if (isVip) {
           slidebarBadge.innerHTML = '<span>👑 VIP Executive Cleared</span>';
         } else {
           slidebarBadge.innerHTML = '<span>✓ Verified Member</span>';
@@ -365,9 +363,7 @@ export function getClientEngineScript(): string {
       }
 
       if (label) {
-        if (currentUser.email === 'lurlbusiness7@gmail.com') {
-          label.innerText = 'Administrator';
-        } else if (isVip) {
+        if (isVip) {
           label.innerText = 'VIP Executive';
         } else {
           label.innerText = masked;

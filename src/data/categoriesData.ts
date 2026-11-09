@@ -1,6 +1,8 @@
-import { CategoryInfo, CategoryType } from '../types';
+import { CategoryInfo, CategoryType, CodexChapter } from '../types';
+import { EXTENDED_CATEGORY_CHAPTERS } from './extendedChaptersData';
+import { ADDITIONAL_CATEGORY_CHAPTERS } from './additionalChaptersData';
 
-export const CATEGORIES_DATA: Record<CategoryType, CategoryInfo> = {
+const BASE_CATEGORIES_DATA: Record<CategoryType, CategoryInfo> = {
   trading: {
     id: 'trading',
     title: 'Precision Trading & Algorithmic Capital',
@@ -770,5 +772,138 @@ export const CATEGORIES_DATA: Record<CategoryType, CategoryInfo> = {
         ],
       },
     ],
+  },
+};
+
+const SKILL_DEV_BONUS_CHAPTERS: CodexChapter[] = [
+  {
+    id: 'skill-ch14-polymath-stack',
+    number: '14',
+    title: 'Polymathic Skill Stacking & Cross-Discipline Alpha Arbitrage',
+    subtitle: 'Combining Orthogonal Competencies for Top 0.1% Global Market Leverage',
+    summary:
+      'Reaching the top 1% in a single domain is statistically grueling; reaching the top 10% in three complementary fields (e.g. Quantitative Finance + AI Engineering + High-Stakes Persuasion) places you in the top 0.1% globally.',
+    readTime: '50 min read · 9,500 Book Pages',
+    content: [
+      'In a hyper-specialized economy disrupted by artificial intelligence, narrow mono-disciplinary experts face rapid obsolescence. The enduring human advantage lies in Polymathic Skill Stacking: synthesizing models and execution habits across orthogonal domains.',
+      'When you combine mathematical fluency with deep narrative storytelling and software systems engineering, you operate in a category of one. You can bridge communication gaps between technical teams, capital allocators, and executive customers that specialized practitioners cannot fathom.',
+      'Systematize skill acquisition by establishing 90-day mastery sprints: identify the foundational 20% of heuristics that drive 80% of real-world outcomes in a target field, build a minimum viable portfolio project, and immediately cross-pollinate with your existing strengths.',
+    ],
+    keyFormulas: [
+      {
+        name: 'Skill-Stacking Rarity Multiplier',
+        formula: 'Rarity = 1 / (P(Skill_A) × P(Skill_B) × P(Skill_C))',
+        explanation: 'Top 10% in 3 skills (0.1 × 0.1 × 0.1 = 0.001) gives you 1 in 1,000 career rarity.',
+      },
+      {
+        name: 'Cross-Domain Synergy Index',
+        formula: 'CSI = (Skill_A × Skill_B × Skill_C)^{1/3} × Innovation_Factor',
+        explanation: 'Quantifies the asymmetric commercial leverage created when distinct disciplines are combined.',
+      },
+    ],
+    checklist: [
+      'Select 3 complementary skills: 1 technical/quantitative, 1 creative/narrative, 1 operational/dealmaking',
+      'Schedule 90-day deliberate practice cycles for your tertiary bottleneck competency',
+      'Build public proof-of-work demonstrating cross-disciplinary synthesis',
+      'Eliminate isolated mono-domain tasks that do not compound into your core talent stack',
+    ],
+  },
+  {
+    id: 'skill-ch15-lifetime-mastery',
+    number: '15',
+    title: 'The Master Competence Codex: Autonomous System & Lifetime Compounding',
+    subtitle: 'Institutional Knowledge Vault, Continuous Telemetry & Antifragile Habit Architecture',
+    summary:
+      'The definitive operational architecture for sustaining elite physical, intellectual, and strategic performance over multiple decades with automated feedback loops.',
+    readTime: '55 min read · 9,500 Book Pages',
+    content: [
+      'Mastery is not a static destination; it is an ongoing biological and intellectual feedback loop. Elite operators protect their cognitive edge by treating energy management, sleep architecture, and knowledge storage as inviolable infrastructure.',
+      'By maintaining a permanent Learning History Vault and regularly stress-testing strategic heuristics against live market data, you remain antifragile to regime shifts and technological disruptions.',
+      'Compounding knowledge functions identical to financial compound interest: initial increments seem modest, but over 5 to 10 years of consistent daily deliberate practice, the gap between you and passive consumers becomes insurmountable.',
+    ],
+    keyFormulas: [
+      {
+        name: 'Compound Knowledge Multiplier',
+        formula: 'Competence_T = Competence_0 × (1 + r)^T where r = 0.01 daily improvement',
+        explanation: '1% daily improvement yields a 37.78x multiplier in capability over 365 days.',
+      },
+      {
+        name: 'Antifragile Resilience Quotient',
+        formula: 'ARQ = Gain_from_Volatility / Maximum_Cognitive_Drawdown',
+        explanation: 'Measures how effectively errors, market surprises, and stress are transmuted into updated knowledge.',
+      },
+    ],
+    checklist: [
+      'Audit daily cognitive focus blocks and protect 90-minute uninterrupted deep-work windows',
+      'Document key takeaways and formulas in your permanent LURL Learning Vault',
+      'Review Weekly Executive Digests to identify recurring behavioral blindspots',
+      'Commit to perpetual continuous learning across the 5 core business and competence domains',
+    ],
+  },
+];
+
+function expandChaptersToFifteen(
+  category: CategoryType,
+  baseList: CodexChapter[]
+): CodexChapter[] {
+  const extList = EXTENDED_CATEGORY_CHAPTERS[category] || [];
+  const addList = ADDITIONAL_CATEGORY_CHAPTERS[category] || [];
+  const bonusList = category === 'skill-development' ? SKILL_DEV_BONUS_CHAPTERS : [];
+
+  const seenIds = new Set<string>();
+  const combined: CodexChapter[] = [];
+
+  const add = (ch: CodexChapter) => {
+    if (!ch || !ch.title) return;
+    const cleanId = ch.id || `ch-${combined.length + 1}`;
+    if (!seenIds.has(cleanId)) {
+      seenIds.add(cleanId);
+      combined.push({
+        ...ch,
+        id: cleanId,
+        checklist:
+          Array.isArray(ch.checklist) && ch.checklist.length > 0
+            ? ch.checklist
+            : [
+                'Review verified metrics and formulas',
+                'Execute operational SOP protocol',
+                'Record takeaways in Learning Vault',
+              ],
+      });
+    }
+  };
+
+  baseList.forEach(add);
+  extList.forEach(add);
+  addList.forEach(add);
+  bonusList.forEach(add);
+
+  // Return the first 15 chapters, numbered cleanly "01" to "15"
+  return combined.slice(0, 15).map((ch, idx) => ({
+    ...ch,
+    number: String(idx + 1).padStart(2, '0'),
+  }));
+}
+
+export const CATEGORIES_DATA: Record<CategoryType, CategoryInfo> = {
+  trading: {
+    ...BASE_CATEGORIES_DATA.trading,
+    chapters: expandChaptersToFifteen('trading', BASE_CATEGORIES_DATA.trading.chapters),
+  },
+  dropshipping: {
+    ...BASE_CATEGORIES_DATA.dropshipping,
+    chapters: expandChaptersToFifteen('dropshipping', BASE_CATEGORIES_DATA.dropshipping.chapters),
+  },
+  ecommerce: {
+    ...BASE_CATEGORIES_DATA.ecommerce,
+    chapters: expandChaptersToFifteen('ecommerce', BASE_CATEGORIES_DATA.ecommerce.chapters),
+  },
+  startup: {
+    ...BASE_CATEGORIES_DATA.startup,
+    chapters: expandChaptersToFifteen('startup', BASE_CATEGORIES_DATA.startup.chapters),
+  },
+  'skill-development': {
+    ...BASE_CATEGORIES_DATA['skill-development'],
+    chapters: expandChaptersToFifteen('skill-development', BASE_CATEGORIES_DATA['skill-development'].chapters),
   },
 };

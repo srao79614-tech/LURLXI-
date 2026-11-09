@@ -1,0 +1,17 @@
+{
+  "srao79614@gmail.com": {
+    "email": "srao79614@gmail.com",
+    "name": "Executive Trader",
+    "age": 26,
+    "selectedCategory": "trading",
+    "avatarUrl": "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=250&q=80",
+    "joinDate": 1793467823265,
+    "isVip": true,
+    "role": "VIP Executive Founder",
+    "preferredTab": "demo-trading",
+    "savedStage": "application",
+    "hasEnteredWebsite": true,
+    "lastSavedAt": 1794211825509,
+    "profession": "VIP Executive Founder"
+  }
+}

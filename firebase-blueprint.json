@@ -30,6 +30,27 @@
           "description": "Avatar image URL",
           "maxLength": 1024
         },
+        "logo": {
+          "type": "string",
+          "description": "User brand logo or custom profile avatar URL",
+          "maxLength": 1024
+        },
+        "age": {
+          "type": "integer",
+          "description": "User verified age in years",
+          "minimum": 18,
+          "maximum": 120
+        },
+        "profession": {
+          "type": "string",
+          "description": "User professional career, trade, or role description",
+          "maxLength": 128
+        },
+        "bio": {
+          "type": "string",
+          "description": "Short bio or motto",
+          "maxLength": 1000
+        },
         "isVip": {
           "type": "boolean",
           "description": "VIP status flag"

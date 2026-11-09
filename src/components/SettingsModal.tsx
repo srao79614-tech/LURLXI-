@@ -471,7 +471,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         className="py-2.5 px-3 rounded-xl bg-[#121622] hover:bg-[#1a202c] border border-[#d47a37]/50 text-white text-xs font-semibold flex items-center justify-center gap-2 cursor-pointer transition-colors"
                       >
                         <Play className="w-3.5 h-3.5 text-[#f8b179]" />
-                        <span>Test Intro Chime</span>
+                        <span>Netflix Ta-dammnnn Intro</span>
                       </button>
 
                       <button

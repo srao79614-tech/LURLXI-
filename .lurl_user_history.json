@@ -1,0 +1,66 @@
+{
+  "srao79614@gmail.com": {
+    "email": "srao79614@gmail.com",
+    "courses": {},
+    "totalMinutes": 145,
+    "totalStudyMinutes": 145,
+    "overallMastery": 28,
+    "performanceMetrics": {
+      "overallMastery": 28,
+      "studyStreakDays": 5,
+      "totalQuizzesPassed": 4,
+      "totalSimulationTrades": 12,
+      "conceptRetentionRate": 84,
+      "retentionRate": 88,
+      "disciplineScore": 92
+    },
+    "weeklyVelocity": [
+      {
+        "day": "Mon",
+        "minutes": 25,
+        "comprehension": 80
+      },
+      {
+        "day": "Tue",
+        "minutes": 35,
+        "comprehension": 85
+      },
+      {
+        "day": "Wed",
+        "minutes": 20,
+        "comprehension": 78
+      },
+      {
+        "day": "Thu",
+        "minutes": 40,
+        "comprehension": 90
+      },
+      {
+        "day": "Fri",
+        "minutes": 15,
+        "comprehension": 82
+      },
+      {
+        "day": "Sat",
+        "minutes": 50,
+        "comprehension": 92
+      },
+      {
+        "day": "Sun",
+        "minutes": 30,
+        "comprehension": 88
+      }
+    ],
+    "lastActive": 1794211727280,
+    "history": [
+      {
+        "id": "act_init_srao79614%40gmail.com_1",
+        "timestamp": 1794211427195,
+        "category": "auth",
+        "title": "Account Workspace Initialized",
+        "description": "Isolated permanent activity vault active for srao79614@gmail.com."
+      }
+    ],
+    "lastSavedAt": 1794211827361
+  }
+}

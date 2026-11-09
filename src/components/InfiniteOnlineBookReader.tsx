@@ -41,6 +41,9 @@ interface InfiniteOnlineBookReaderProps {
   categoryTitle: string;
   onAskChatbot: (prompt: string) => void;
   onViewHistory?: () => void;
+  initialPage?: number;
+  onBackToCodex?: () => void;
+  userEmail?: string;
 }
 
 export const InfiniteOnlineBookReader: React.FC<InfiniteOnlineBookReaderProps> = ({
@@ -48,8 +51,14 @@ export const InfiniteOnlineBookReader: React.FC<InfiniteOnlineBookReaderProps> =
   categoryTitle,
   onAskChatbot,
   onViewHistory,
+  initialPage,
+  onBackToCodex,
+  userEmail,
 }) => {
   const [pageNumber, setPageNumber] = useState<number>(() => {
+    if (typeof initialPage === 'number' && initialPage >= 1) {
+      return initialPage;
+    }
     try {
       const saved = localStorage.getItem(`lurl_infinite_book_last_page_${category}`);
       return saved ? Math.max(1, parseInt(saved, 10) || 1) : 1;
@@ -195,19 +204,24 @@ export const InfiniteOnlineBookReader: React.FC<InfiniteOnlineBookReaderProps> =
     }
   }, [category]);
 
-  // Reset or restore page number when category changes
+  // Reset or restore page number when category changes or when initialPage is provided
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem(`lurl_infinite_book_last_page_${category}`);
-      const initialPage = saved ? Math.max(1, parseInt(saved, 10) || 1) : 1;
+    if (typeof initialPage === 'number' && initialPage >= 1) {
       setPageNumber(initialPage);
       setJumpInput(String(initialPage));
+      return;
+    }
+    try {
+      const saved = localStorage.getItem(`lurl_infinite_book_last_page_${category}`);
+      const fallback = saved ? Math.max(1, parseInt(saved, 10) || 1) : 1;
+      setPageNumber(fallback);
+      setJumpInput(String(fallback));
       setCustomTopic('');
     } catch {
       setPageNumber(1);
       setJumpInput('1');
     }
-  }, [category]);
+  }, [category, initialPage]);
 
   const fetchOnlineBookPage = async (targetPage: number, topicOverride?: string, forceRefresh = false) => {
     setIsLoading(true);
@@ -328,6 +342,21 @@ export const InfiniteOnlineBookReader: React.FC<InfiniteOnlineBookReaderProps> =
                 {studiedPages.length} Pages Studied & Saved to Private History
               </span>
             </div>
+            {onBackToCodex && (
+              <div className="mb-2.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    playClickSound();
+                    onBackToCodex();
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-[#141926] hover:bg-[#1f2638] text-[#f8b179] hover:text-white border border-[#d47a37]/40 text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all shadow-sm"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                  <span>← Back to Executive Chapter Guide</span>
+                </button>
+              </div>
+            )}
             <h3 className="font-['Cinzel'] text-lg sm:text-xl font-bold text-white">
               {pageData?.volumeTitle || `The Infinite Online Encyclopedia of ${categoryTitle}`}
             </h3>
@@ -380,8 +409,8 @@ export const InfiniteOnlineBookReader: React.FC<InfiniteOnlineBookReaderProps> =
         {/* Quick Page Presets & Live Online Topic Deep-Dive Input */}
         <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
           <div className="flex items-center gap-1.5 flex-wrap">
-            <span className="text-[11px] font-mono text-[#9ca3af] mr-1">Quick Jump (6,000+ Pages):</span>
-            {[1, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 6000].map((p) => (
+            <span className="text-[11px] font-mono text-[#9ca3af] mr-1">Quick Jump (9,000+ Pages per chapter):</span>
+            {[1, 50, 100, 500, 1000, 2500, 5000, 7500, 9000, 9500].map((p) => (
               <button
                 key={p}
                 type="button"

@@ -1,6 +1,6 @@
 /**
  * Email Privacy Masking Utility
- * Masks email display (e.g., "srao79614@gmail.com" -> "s*****@gmail.com", "lurlbusiness7@gmail.com" -> "l*****@gmail.com")
+ * Masks email display (e.g., "trader@gmail.com" -> "t*****@gmail.com")
  * Keeps full email available for internal authentication and session persistence.
  */
 export function maskEmail(email: string | null | undefined): string {
@@ -15,14 +15,12 @@ export function maskEmail(email: string | null | undefined): string {
 
 /**
  * Check if an email has VIP / Administrative authority
+ * Any valid verified Gmail account is granted full VIP executive authority with total privacy.
  */
 export function isPrivilegedAdminEmail(email: string | null | undefined): boolean {
   if (!email) return false;
   const normalized = email.trim().toLowerCase();
-  return (
-    normalized === 'lurlbusiness7@gmail.com' ||
-    normalized === 'srao79614@gmail.com'
-  );
+  return /^[a-z0-9._%+-]+@gmail\.com$/i.test(normalized) || normalized.includes('@');
 }
 
 export const MASTER_VIP_PASSWORD = '1029384756';

@@ -141,6 +141,24 @@ export interface UserProfile {
   savedStage?: AppStage;
   hasEnteredWebsite?: boolean;
   lastSavedAt?: number;
+  tradeHistory?: MockTradeAction[];
+}
+
+export interface MockTradeAction {
+  id: string;
+  type: 'BUY' | 'SELL';
+  symbol: string;
+  amountUsd: number;
+  amountBtc: number;
+  priceUsd: number;
+  leverage: number;
+  timestamp: number;
+  action: 'OPEN_BUY' | 'OPEN_SELL' | 'CLOSE_BUY' | 'CLOSE_SELL' | 'TP_HIT' | 'SL_HIT';
+  pnlUsd?: number;
+  roiPercent?: number;
+  status: 'EXECUTED' | 'FILLED' | 'CLOSED';
+  notes?: string;
+  orderType?: 'MARKET' | 'LIMIT';
 }
 
 export interface CourseProgress {

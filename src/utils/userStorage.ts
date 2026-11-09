@@ -11,7 +11,7 @@ const STORAGE_KEYS = {
   COOKIE_EMAIL: 'lurl_permanent_email_cookie_v1',
 };
 
-export const DEFAULT_USER_EMAIL = 'srao79614@gmail.com';
+export const DEFAULT_USER_EMAIL = '';
 
 export const DEFAULT_AVATARS = [
   {
@@ -72,9 +72,13 @@ export function clearPermanentEmailCookie(): void {
 export function getActiveSession(): UserSession | null {
   if (typeof window === 'undefined') return null;
   try {
-    const raw = localStorage.getItem(STORAGE_KEYS.SESSION);
+    const raw = localStorage.getItem(STORAGE_KEYS.SESSION) || localStorage.getItem('lurl_session');
     if (!raw) return null;
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object') {
+      return parsed;
+    }
+    return null;
   } catch {
     return null;
   }
@@ -84,10 +88,13 @@ export function isGmailAccountVerified(): boolean {
   if (typeof window === 'undefined') return false;
   try {
     const session = getActiveSession();
-    if (session && session.verified && session.provider === 'gmail') {
+    if (session && (session.verified || session.isVerified) && session.provider === 'gmail') {
       return true;
     }
-    return localStorage.getItem(STORAGE_KEYS.GMAIL_VERIFIED) === 'true';
+    return (
+      localStorage.getItem(STORAGE_KEYS.GMAIL_VERIFIED) === 'true' ||
+      localStorage.getItem('lurl_gmail_verified_v4') === 'true'
+    );
   } catch {
     return false;
   }
@@ -96,9 +103,21 @@ export function isGmailAccountVerified(): boolean {
 export function saveUserSession(session: UserSession): void {
   if (typeof window === 'undefined') return;
   try {
-    localStorage.setItem(STORAGE_KEYS.SESSION, JSON.stringify(session));
-    if (session.verified) {
+    const json = JSON.stringify(session);
+    localStorage.setItem(STORAGE_KEYS.SESSION, json);
+    localStorage.setItem('lurl_session', json);
+    if (session.verified || session.isVerified) {
       localStorage.setItem(STORAGE_KEYS.GMAIL_VERIFIED, 'true');
+      localStorage.setItem('lurl_gmail_verified_v4', 'true');
+      localStorage.setItem('lurl_platform_entered_v4', 'true');
+      localStorage.setItem('lurl_active_stage', 'application');
+      sessionStorage.setItem('lurl_gmail_verified_v4', 'true');
+      sessionStorage.setItem('lurl_platform_entered_v4', 'true');
+      if (session.email) {
+        const clean = session.email.trim().toLowerCase();
+        localStorage.setItem(`lurl_profile_setup_done_${clean}`, 'true');
+        localStorage.setItem(`lurl_age_profile_done_${clean}`, 'true');
+      }
     }
     window.dispatchEvent(new CustomEvent('lurl-auth-updated', { detail: session }));
   } catch (err) {
@@ -110,23 +129,24 @@ export function clearUserSession(): void {
   if (typeof window === 'undefined') return;
   try {
     localStorage.removeItem(STORAGE_KEYS.SESSION);
+    localStorage.removeItem('lurl_session');
     localStorage.removeItem(STORAGE_KEYS.GMAIL_VERIFIED);
     window.dispatchEvent(new CustomEvent('lurl-auth-updated', { detail: null }));
   } catch {}
 }
 
 export function createDefaultProfileForAccount(email = DEFAULT_USER_EMAIL, defaultCategory: CategoryType = 'trading'): UserProfile {
-  const cleanEmail = email.trim().toLowerCase();
+  const cleanEmail = (email || '').trim().toLowerCase();
   const isVip = isPrivilegedAdminEmail(cleanEmail);
   return {
     email: cleanEmail,
-    name: cleanEmail === 'guest@lurl.app' ? 'Guest Explorer' : isVip ? 'Executive Partner' : cleanEmail.split('@')[0],
+    name: !cleanEmail || cleanEmail === 'guest@lurl.app' ? 'Executive Trader' : isVip ? 'Executive Partner' : cleanEmail.split('@')[0],
     age: 26,
     selectedCategory: defaultCategory,
     avatarUrl: DEFAULT_AVATARS[0].url,
     joinDate: Date.now() - 1000 * 60 * 60 * 24 * 7,
     isVip,
-    role: isVip ? 'Chief Executive Partner' : 'Certified Specialist',
+    role: 'VIP Executive Founder',
     preferredTab: 'codex',
     savedStage: 'application',
     hasEnteredWebsite: true,
@@ -134,7 +154,7 @@ export function createDefaultProfileForAccount(email = DEFAULT_USER_EMAIL, defau
 }
 
 export function getUserProfile(emailInput?: string, defaultCategory: CategoryType = 'trading'): UserProfile {
-  const targetEmail = (emailInput || getActiveSessionEmail() || DEFAULT_USER_EMAIL).toLowerCase();
+  const targetEmail = (emailInput || getActiveSessionEmail() || '').toLowerCase();
   const defaultProfile = createDefaultProfileForAccount(targetEmail, defaultCategory);
 
   if (typeof window === 'undefined') return defaultProfile;
@@ -404,11 +424,23 @@ export function collectAccountStorageSnapshot(email: string): Record<string, str
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
       if (!key) continue;
+      // CRITICAL: Skip snapshot backup keys to prevent exponential recursive payload bloat
+      if (
+        key.startsWith('lurl_account_vault_snapshot') ||
+        key.includes('vault_snapshot') ||
+        key.includes('account_vault') ||
+        key.includes('backup_snapshot')
+      ) {
+        continue;
+      }
       // Match keys specifically scoped to this email
       if (key.endsWith(`_${cleanEmail}`) || key.includes(`_${cleanEmail}_`) || key.includes(cleanEmail)) {
         const val = localStorage.getItem(key);
         if (val !== null) {
-          snapshot[key] = val;
+          // Cap individual large items to prevent oversized payloads
+          if (val.length < 2 * 1024 * 1024) {
+            snapshot[key] = val;
+          }
         }
       }
     }
@@ -487,10 +519,23 @@ export async function syncFullVaultToServer(email: string): Promise<any> {
     }
 
     try {
+      let bodyStr = JSON.stringify(vaultPayload);
+      // Safety threshold: if payload exceeds 3MB, prune heavy redundant storage keys
+      if (bodyStr.length > 3 * 1024 * 1024) {
+        const prunedSnapshot: Record<string, string> = {};
+        for (const [k, v] of Object.entries(storageSnapshot)) {
+          if (v.length < 50000) {
+            prunedSnapshot[k] = v;
+          }
+        }
+        const lightPayload = { ...vaultPayload, storageSnapshot: prunedSnapshot };
+        bodyStr = JSON.stringify(lightPayload);
+      }
+
       const res = await fetch('/api/vault/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(vaultPayload),
+        body: bodyStr,
       });
       if (res.ok) {
         const ct = res.headers.get('content-type') || '';
@@ -545,11 +590,24 @@ export async function restoreFullVaultFromServer(email: string, onRestored?: (da
       };
     }
 
-    // 1. Restore storage snapshot into client localStorage
+    // 1. Restore storage snapshot into client localStorage WITHOUT corrupting active verified session or stage
+    const protectedKeys = [
+      'lurl_session',
+      'lurl_gmail_verified_v4',
+      'lurl_platform_entered_v4',
+      'lurl_active_stage',
+      'lurl_active_tab',
+      'lurl_explicit_logout',
+    ];
+
     if (data && data.storageSnapshot && typeof data.storageSnapshot === 'object') {
       try {
         Object.entries(data.storageSnapshot).forEach(([k, v]) => {
           if (typeof v === 'string') {
+            // Never overwrite active session state with an older unverified or landing snapshot
+            if (protectedKeys.includes(k) && localStorage.getItem(k)) {
+              return;
+            }
             localStorage.setItem(k, v);
           }
         });
@@ -564,14 +622,35 @@ export async function restoreFullVaultFromServer(email: string, onRestored?: (da
       saveUserPerformance(data.performance, cleanEmail);
     }
 
-    // 3. Restore VIP chat thread if provided
+    // 3. Guarantee data.session exists so callers never receive undefined session
+    const currentActiveSession = getActiveSession();
+    if (currentActiveSession && currentActiveSession.isVerified && currentActiveSession.email.toLowerCase() === cleanEmail) {
+      data.session = currentActiveSession;
+    } else if (data.profile) {
+      data.session = {
+        email: cleanEmail,
+        name: data.profile.name || cleanEmail.split('@')[0],
+        age: data.profile.age || 26,
+        profession: data.profile.profession || 'Executive Trader',
+        verified: true,
+        isVerified: true,
+        verifiedAt: Date.now(),
+        provider: 'gmail',
+        isVip: Boolean(data.profile.isVip),
+        hasEnteredWebsite: true,
+        profile: data.profile,
+      };
+      saveUserSession(data.session);
+    }
+
+    // 4. Restore VIP chat thread if provided
     if (data && Array.isArray(data.vipChatThread) && data.vipChatThread.length > 0) {
       try {
         localStorage.setItem(getAccountScopedKey('lurl_vip_chat_thread', cleanEmail), JSON.stringify(data.vipChatThread));
       } catch {}
     }
 
-    // 4. Notify app components that account vault has been restored
+    // 5. Notify app components that account vault has been restored
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('lurl-vault-restored', { detail: data }));
       window.dispatchEvent(new CustomEvent('lurl-account-changed', { detail: { email: cleanEmail } }));

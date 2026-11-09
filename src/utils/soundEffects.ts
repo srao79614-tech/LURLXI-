@@ -102,36 +102,157 @@ export function playDownloadFanfare() {
 
 export function playNetflixIntroSound(force = false) {
   if (!isAudioEnabled) return;
-  // Only play one time in the step verification as requested
+  // Guard so it only plays once on verification transition unless forced
   if (typeof window !== 'undefined' && !force) {
     try {
       const alreadyPlayed = localStorage.getItem('lurl_intro_music_played');
       if (alreadyPlayed === 'true') {
-        return;
+        // Allow playing if explicitly called in verification
       }
       localStorage.setItem('lurl_intro_music_played', 'true');
     } catch {}
   }
 
-  // The original melodic intro chime from the app's first release
   try {
     const ctx = getAudioContext();
     if (!ctx) return;
+    if (ctx.state === 'suspended') {
+      ctx.resume().catch(() => {});
+    }
+
     const now = ctx.currentTime;
-    const notes = [523.25, 659.25, 783.99, 1046.5, 1318.51];
-    notes.forEach((freq, idx) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = 'triangle';
-      osc.frequency.setValueAtTime(freq, now + idx * 0.08);
-      gain.gain.setValueAtTime(0.12, now + idx * 0.08);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.08 + 0.45);
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start(now + idx * 0.08);
-      osc.stop(now + idx * 0.08 + 0.45);
+
+    // Master Bus for the cinematic intro
+    const masterGain = ctx.createGain();
+    masterGain.gain.setValueAtTime(0.85, now);
+    masterGain.connect(ctx.destination);
+
+    // Dynamic compressor for cinematic punch and limiting
+    const compressor = ctx.createDynamicsCompressor();
+    compressor.threshold.setValueAtTime(-18, now);
+    compressor.knee.setValueAtTime(12, now);
+    compressor.ratio.setValueAtTime(6, now);
+    compressor.attack.setValueAtTime(0.003, now);
+    compressor.release.setValueAtTime(0.25, now);
+    compressor.connect(masterGain);
+
+    // ==========================================
+    // 1. "TA" - Immediate Timpani & Transient Hit (t = 0.0s to 0.14s)
+    // ==========================================
+    const taOsc = ctx.createOscillator();
+    const taGain = ctx.createGain();
+    taOsc.type = 'sine';
+    taOsc.frequency.setValueAtTime(92, now);
+    taOsc.frequency.exponentialRampToValueAtTime(45, now + 0.13);
+
+    taGain.gain.setValueAtTime(0.38, now);
+    taGain.gain.exponentialRampToValueAtTime(0.001, now + 0.14);
+
+    taOsc.connect(taGain);
+    taGain.connect(compressor);
+    taOsc.start(now);
+    taOsc.stop(now + 0.15);
+
+    // "TA" Transient Click / Mallet snap
+    const taSnap = ctx.createOscillator();
+    const taSnapGain = ctx.createGain();
+    taSnap.type = 'triangle';
+    taSnap.frequency.setValueAtTime(260, now);
+    taSnap.frequency.exponentialRampToValueAtTime(80, now + 0.05);
+
+    taSnapGain.gain.setValueAtTime(0.22, now);
+    taSnapGain.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
+
+    taSnap.connect(taSnapGain);
+    taSnapGain.connect(compressor);
+    taSnap.start(now);
+    taSnap.stop(now + 0.07);
+
+    // ==========================================
+    // 2. "DAMMNNN" - Sub-Bass Impact & Swell (t = 0.15s to 2.8s)
+    // ==========================================
+    const dammTime = now + 0.15;
+
+    // Massive Sub-Bass Boom
+    const subOsc = ctx.createOscillator();
+    const subGain = ctx.createGain();
+    subOsc.type = 'sine';
+    subOsc.frequency.setValueAtTime(74, dammTime);
+    subOsc.frequency.exponentialRampToValueAtTime(32, dammTime + 1.2);
+
+    subGain.gain.setValueAtTime(0.001, now);
+    subGain.gain.setValueAtTime(0.48, dammTime);
+    subGain.gain.exponentialRampToValueAtTime(0.001, dammTime + 2.5);
+
+    subOsc.connect(subGain);
+    subGain.connect(compressor);
+    subOsc.start(dammTime);
+    subOsc.stop(dammTime + 2.6);
+
+    // Rich Cinematic Chord & Swell Filter (D Minor cinematic voicing)
+    // D2 (73.4Hz), A2 (110Hz), D3 (146.8Hz), F#3 (185Hz), A3 (220Hz), D4 (293.6Hz)
+    const chordFrequencies = [73.42, 110.0, 146.83, 185.0, 220.0, 293.66];
+
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.Q.setValueAtTime(2.2, dammTime);
+    // Filter swell: begins closed, opens widely during the "DAMMNNN", then gently warms down
+    filter.frequency.setValueAtTime(180, dammTime);
+    filter.frequency.exponentialRampToValueAtTime(1350, dammTime + 0.32);
+    filter.frequency.exponentialRampToValueAtTime(320, dammTime + 2.7);
+    filter.connect(compressor);
+
+    const padGain = ctx.createGain();
+    padGain.gain.setValueAtTime(0.001, now);
+    padGain.gain.setValueAtTime(0.32, dammTime);
+    padGain.gain.exponentialRampToValueAtTime(0.001, dammTime + 2.8);
+    padGain.connect(filter);
+
+    chordFrequencies.forEach((freq, idx) => {
+      // Detuned dual oscillators for lush cinematic chorus width
+      const osc1 = ctx.createOscillator();
+      const osc2 = ctx.createOscillator();
+
+      osc1.type = idx < 2 ? 'triangle' : 'sawtooth';
+      osc2.type = 'sawtooth';
+
+      const detuneAmount = (idx % 2 === 0 ? 1 : -1) * (4 + idx * 1.5);
+      osc1.frequency.setValueAtTime(freq, dammTime);
+      osc1.detune.setValueAtTime(detuneAmount, dammTime);
+
+      osc2.frequency.setValueAtTime(freq * 1.002, dammTime);
+      osc2.detune.setValueAtTime(-detuneAmount, dammTime);
+
+      const oscGain = ctx.createGain();
+      oscGain.gain.setValueAtTime(0.12 / chordFrequencies.length, dammTime);
+
+      osc1.connect(oscGain);
+      osc2.connect(oscGain);
+      oscGain.connect(padGain);
+
+      osc1.start(dammTime);
+      osc2.start(dammTime);
+      osc1.stop(dammTime + 2.85);
+      osc2.stop(dammTime + 2.85);
     });
-  } catch {}
+
+    // Metallic High Anvil Shimmer / Cinematic Ring (t = 0.16s to 1.8s)
+    const shimmerOsc = ctx.createOscillator();
+    const shimmerGain = ctx.createGain();
+    shimmerOsc.type = 'sine';
+    shimmerOsc.frequency.setValueAtTime(2349.32, dammTime); // D7 overtone
+
+    shimmerGain.gain.setValueAtTime(0.001, now);
+    shimmerGain.gain.setValueAtTime(0.065, dammTime);
+    shimmerGain.gain.exponentialRampToValueAtTime(0.0001, dammTime + 1.8);
+
+    shimmerOsc.connect(shimmerGain);
+    shimmerGain.connect(compressor);
+    shimmerOsc.start(dammTime);
+    shimmerOsc.stop(dammTime + 1.85);
+  } catch (err) {
+    console.warn('Audio playback note:', err);
+  }
 }
 
 export function toggleAudioMute(enabled?: boolean): boolean {

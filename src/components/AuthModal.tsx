@@ -14,6 +14,9 @@ import {
   Briefcase,
   Image as ImageIcon,
   Check,
+  Loader2,
+  RefreshCw,
+  Copy,
 } from 'lucide-react';
 import { playClickSound, playSuccessChime, playNetflixIntroSound } from '../utils/soundEffects';
 import {
@@ -48,8 +51,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 }) => {
   const [email, setEmail] = useState<string>(defaultEmail);
   const [step, setStep] = useState<'input' | 'otp' | 'profile-setup' | 'entering'>('input');
-  const [otpCode, setOtpCode] = useState<string>('796140');
+  const [otpCode, setOtpCode] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [isSendingOtp, setIsSendingOtp] = useState<boolean>(false);
+  const [isVerifyingOtp, setIsVerifyingOtp] = useState<boolean>(false);
+  const [resendCooldown, setResendCooldown] = useState<number>(0);
+  const [otpDispatchedMessage, setOtpDispatchedMessage] = useState<string | null>(null);
+  const [sandboxPreviewCode, setSandboxPreviewCode] = useState<string | null>(null);
+  const [copiedCode, setCopiedCode] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   // Profile Information Fields for Step 2
@@ -87,12 +96,22 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     return existingProfile?.selectedCategory || 'trading';
   });
 
+  // Cooldown timer for OTP resends
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const interval = setInterval(() => {
+      setResendCooldown((prev) => Math.max(0, prev - 1));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [resendCooldown]);
+
   // Track if this user has already completed their personal profile
   const isProfileAlreadyCompleted = (targetEmail: string): boolean => {
     const clean = targetEmail.trim().toLowerCase();
     try {
-      const doneFlag = localStorage.getItem(`lurl_profile_setup_done_${clean}`);
-      if (doneFlag === 'true') return true;
+      const doneFlag1 = localStorage.getItem(`lurl_profile_setup_done_${clean}`);
+      const doneFlag2 = localStorage.getItem(`lurl_age_profile_done_${clean}`);
+      if (doneFlag1 === 'true' || doneFlag2 === 'true') return true;
       const profile = getUserProfile(clean);
       if (profile && profile.age && Number(profile.age) >= 18 && profile.profession && profile.hasEnteredWebsite) {
         return true;
@@ -105,13 +124,18 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     if (isOpen) {
       if (initialStep === 'profile-setup') {
         setStep('profile-setup');
+      } else if (initialStep === 'otp') {
+        setStep('otp');
       } else {
         setStep('input');
       }
       setEmail(defaultEmail);
-      setOtpCode('796140');
+      setOtpCode('');
       setErrorMsg(null);
       setIsLoading(false);
+      setIsSendingOtp(false);
+      setIsVerifyingOtp(false);
+      setCopiedCode(false);
     }
   }, [isOpen, initialStep, defaultEmail]);
 
@@ -126,10 +150,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     userAvatar: string
   ) => {
     const cleanEmail = targetEmail.trim().toLowerCase();
-    const isVip =
-      cleanEmail === 'srao79614@gmail.com' ||
-      cleanEmail === 'lurlbusiness7@gmail.com' ||
-      isPrivilegedAdminEmail(cleanEmail);
+    const isVip = true;
 
     // Save profile state permanently
     const profile = getUserProfile(cleanEmail, selectedTrack);
@@ -141,15 +162,21 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     profile.isVip = isVip;
     profile.role = isVip ? 'VIP Executive Founder' : userProfession;
     profile.hasEnteredWebsite = true;
+    profile.savedStage = 'application';
     saveUserProfile(profile);
 
-    // Mark personal profile setup as completed
+    // Mark personal profile setup as completed across all key variants
     try {
       localStorage.setItem(`lurl_profile_setup_done_${cleanEmail}`, 'true');
+      localStorage.setItem(`lurl_age_profile_done_${cleanEmail}`, 'true');
+      localStorage.setItem('lurl_profile_setup_done', 'true');
+      localStorage.setItem('lurl_age_profile_done', 'true');
       localStorage.setItem('lurl_user_age', String(userAge));
       localStorage.setItem('lurl_user_profession', profile.profession);
       localStorage.setItem('lurl_gmail_verified_v4', 'true');
       localStorage.setItem('lurl_platform_entered_v4', 'true');
+      localStorage.setItem('lurl_active_stage', 'application');
+      localStorage.setItem('lurl_active_tab', 'performance');
       sessionStorage.setItem('lurl_gmail_verified_v4', 'true');
       sessionStorage.setItem('lurl_platform_entered_v4', 'true');
     } catch {}
@@ -174,12 +201,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     playNetflixIntroSound();
     setStep('entering');
 
+    // Notify parent to open dashboard immediately
+    if (onSuccess) onSuccess(session);
+    if (onVerificationSuccess) onVerificationSuccess(session.email);
+
     setTimeout(() => {
-      if (onSuccess) onSuccess(session);
-      if (onVerificationSuccess) onVerificationSuccess(session.email);
       onClose();
-      setStep('input');
-    }, 700);
+    }, 400);
   };
 
   const handleFirebaseGoogleSignIn = async () => {
@@ -223,38 +251,91 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
   };
 
-  const handleSendCode = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSendCode = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     setErrorMsg(null);
 
     const clean = email.trim().toLowerCase();
-    if (!clean || !clean.includes('@') || !clean.endsWith('.com')) {
+    const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+    if (!clean || !emailRegex.test(clean)) {
       setErrorMsg('Please enter a valid Gmail address (e.g. yourname@gmail.com)');
       return;
     }
 
     playClickSound();
-    setStep('otp');
-    setOtpCode('796140');
+    setIsSendingOtp(true);
+
+    try {
+      const res = await fetch('/api/otp/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: clean }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setErrorMsg(data.error || 'Failed to dispatch verification code. Please try again.');
+        return;
+      }
+
+      setOtpDispatchedMessage(data.message || `A secure 6-digit One-Time Password was dispatched to ${clean}`);
+      if (data.previewCode) {
+        setSandboxPreviewCode(data.previewCode);
+      }
+      setOtpCode('');
+      setResendCooldown(30);
+      setStep('otp');
+      playSuccessChime();
+    } catch (err: any) {
+      setErrorMsg('Network error while requesting verification code. Please check your connection and retry.');
+    } finally {
+      setIsSendingOtp(false);
+    }
   };
 
-  const handleVerifyOtp = (e: React.FormEvent) => {
+  const handleVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
 
-    if (otpCode.trim().length < 4) {
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanCode = otpCode.trim();
+
+    if (!cleanCode || cleanCode.length < 4) {
       setErrorMsg('Please enter the 6-digit verification code.');
       return;
     }
 
     playClickSound();
-    const cleanEmail = email.trim().toLowerCase();
+    setIsVerifyingOtp(true);
 
-    // Check if user has already set up their personal profile
-    if (!isProfileAlreadyCompleted(cleanEmail)) {
-      setStep('profile-setup');
-    } else {
-      finalizeEntryToDashboard(cleanEmail, age, displayName, profession, avatarUrl);
+    try {
+      const res = await fetch('/api/otp/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: cleanEmail, code: cleanCode }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setErrorMsg(data.error || 'Invalid verification code. Please check and try again.');
+        return;
+      }
+
+      playSuccessChime();
+
+      try {
+        localStorage.setItem('lurl_gmail_verified_v4', 'true');
+        localStorage.setItem(`lurl_verified_email_${cleanEmail}`, 'true');
+      } catch {}
+
+      // Check if user has already set up their personal profile
+      if (!isProfileAlreadyCompleted(cleanEmail)) {
+        setStep('profile-setup');
+      } else {
+        finalizeEntryToDashboard(cleanEmail, age, displayName, profession, avatarUrl);
+      }
+    } catch (err: any) {
+      setErrorMsg('Error verifying code. Please check your connection and retry.');
+    } finally {
+      setIsVerifyingOtp(false);
     }
   };
 
@@ -318,27 +399,27 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               <div>
                 <div className="flex items-center gap-1.5">
                   <span className="text-[10px] font-mono font-bold text-amber-400 uppercase tracking-widest">
-                    STEP 1 OF 2 • VERIFY CREDENTIAL
+                    STEP 1 OF 2 • GMAIL ID VERIFICATION
                   </span>
                   <span className="px-1.5 py-0.2 bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[9px] font-mono rounded-full flex items-center gap-0.5">
-                    <Flame className="w-2.5 h-2.5" /> FIRESTORE
+                    <Flame className="w-2.5 h-2.5" /> SECURE OTP
                   </span>
                 </div>
                 <h2 className="text-xl font-bold font-['Cinzel'] text-white">
-                  Verify Your Gmail ID
+                  Enter Your Gmail ID
                 </h2>
               </div>
             </div>
 
             <p className="text-xs text-[#94a3b8] leading-relaxed">
-              Verify your Gmail ID to access the platform, Firestore cloud vault, trading analytics, and curriculum chapters.
+              Enter your Gmail ID to receive a secure, time-sensitive One-Time Password (OTP) generated using cryptographically strong CSPRNG before accessing the platform.
             </p>
 
-            {/* Firebase Google Sign-In Primary Button */}
+            {/* Firebase Google Sign-In Primary Option */}
             <button
               type="button"
               onClick={handleFirebaseGoogleSignIn}
-              disabled={isLoading}
+              disabled={isLoading || isSendingOtp}
               className="w-full p-3 rounded-xl bg-gradient-to-r from-amber-950/60 via-[#1e2638] to-[#121927] hover:border-amber-400/80 border border-amber-500/40 text-white flex items-center justify-between cursor-pointer transition-all shadow-md group"
             >
               <div className="flex items-center gap-2.5">
@@ -360,41 +441,25 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               <ArrowRight className="w-4 h-4 text-amber-400 group-hover:translate-x-1 transition-transform" />
             </button>
 
-            {/* Quick 1-Click Option for default user */}
-            <button
-              type="button"
-              onClick={handleQuickOneClickGmail}
-              disabled={isLoading}
-              className="w-full p-2.5 rounded-xl bg-gradient-to-r from-[#172033] to-[#121927] hover:from-[#1e2a42] hover:to-[#172136] border border-[#3b82f6]/40 hover:border-[#3b82f6] text-white flex items-center justify-between cursor-pointer transition-all shadow-sm group"
-            >
-              <div className="flex items-center gap-2.5">
-                <div className="w-6 h-6 rounded-full bg-white flex items-center justify-center text-xs font-bold text-slate-900">
-                  G
-                </div>
-                <div className="text-left">
-                  <div className="text-xs font-semibold text-white group-hover:text-blue-300 transition-colors">
-                    1-Click Instant Verify as {defaultEmail}
-                  </div>
-                  <div className="text-[10px] text-gray-400">
-                    Direct token verification
-                  </div>
-                </div>
-              </div>
-              <ArrowRight className="w-3.5 h-3.5 text-blue-400 group-hover:translate-x-1 transition-transform" />
-            </button>
-
-            <div className="relative flex items-center justify-center py-1">
+            <div className="relative flex items-center justify-center py-2">
               <div className="w-full border-t border-[#1f2638]" />
               <span className="absolute px-3 bg-[#0c1018] text-[10px] font-mono uppercase text-gray-500">
-                Or enter Gmail ID
+                Or submit Gmail ID for secure OTP
               </span>
             </div>
 
-            <form onSubmit={handleSendCode} className="space-y-3">
+            <form onSubmit={handleSendCode} className="space-y-3.5">
               <div>
-                <label className="block text-xs font-medium text-gray-300 mb-1">
-                  Gmail Address
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-medium text-gray-300">
+                    Gmail Address
+                  </label>
+                  {email.toLowerCase().endsWith('@gmail.com') && (
+                    <span className="text-[10px] font-mono text-emerald-400 flex items-center gap-1">
+                      <Check className="w-3 h-3" /> Valid Gmail format
+                    </span>
+                  )}
+                </div>
                 <div className="relative">
                   <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
                   <input
@@ -403,24 +468,35 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="yourname@gmail.com"
                     required
+                    disabled={isSendingOtp}
                     className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-[#080b12] border border-[#252c3d] text-white text-xs placeholder-gray-600 focus:outline-none focus:border-[#d47a37] transition-all font-mono"
                   />
                 </div>
               </div>
 
               {errorMsg && (
-                <div className="p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs">
-                  {errorMsg}
+                <div className="p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-center gap-2">
+                  <X className="w-4 h-4 shrink-0 text-rose-400" />
+                  <span>{errorMsg}</span>
                 </div>
               )}
 
               <button
                 type="submit"
-                disabled={isLoading}
-                className="w-full py-2.5 rounded-xl bg-gradient-to-r from-[#d47a37] to-[#b85d19] hover:from-[#e08a46] hover:to-[#a2480f] text-white text-xs font-bold transition-all cursor-pointer shadow-lg flex items-center justify-center gap-2"
+                disabled={isSendingOtp || isLoading}
+                className="w-full py-2.5 rounded-xl bg-gradient-to-r from-[#d47a37] to-[#b85d19] hover:from-[#e08a46] hover:to-[#a2480f] disabled:opacity-50 text-white text-xs font-bold transition-all cursor-pointer shadow-lg flex items-center justify-center gap-2"
               >
-                <span>Continue to Step 2 Verification</span>
-                <ArrowRight className="w-4 h-4" />
+                {isSendingOtp ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin text-white" />
+                    <span>Dispatching Secure OTP...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Send One-Time Password (OTP)</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </>
+                )}
               </button>
             </form>
           </div>
@@ -434,52 +510,138 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 <KeyRound className="w-5 h-5" />
               </div>
               <div>
-                <span className="text-[10px] font-mono font-bold text-amber-400 uppercase tracking-widest">
-                  STEP 2 OF 2 • CODE CONFIRMATION
-                </span>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] font-mono font-bold text-amber-400 uppercase tracking-widest">
+                    STEP 2 OF 2 • SECURE OTP VERIFICATION
+                  </span>
+                  <span className="px-1.5 py-0.2 bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[9px] font-mono rounded-full">
+                    HMAC-SHA256
+                  </span>
+                </div>
                 <h2 className="text-xl font-bold font-['Cinzel'] text-white">
-                  Enter 6-Digit Code
+                  Enter One-Time Password
                 </h2>
               </div>
             </div>
 
-            <p className="text-xs text-[#94a3b8] leading-relaxed">
-              Dispatched code to <strong className="text-white">{email}</strong>. Pre-filled below for instant verification.
-            </p>
+            {/* OTP Dispatched Info Banner */}
+            <div className="p-3 rounded-xl bg-[#080b12] border border-[#252c3d] flex items-center justify-between text-xs">
+              <div className="flex items-center gap-2">
+                <Mail className="w-4 h-4 text-emerald-400 shrink-0" />
+                <div className="text-left">
+                  <span className="text-[10px] font-mono uppercase text-gray-400 block">Sent to Gmail</span>
+                  <span className="font-mono font-bold text-white">{email}</span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setStep('input');
+                  setErrorMsg(null);
+                }}
+                className="text-[10px] text-amber-400 hover:text-amber-300 underline font-mono cursor-pointer"
+              >
+                Change
+              </button>
+            </div>
+
+            {/* Sandbox Test Helper Banner */}
+            {sandboxPreviewCode && (
+              <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between text-xs">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+                  <div>
+                    <span className="text-[10px] uppercase font-mono text-amber-400 block font-bold">
+                      Dispatched OTP (Sandbox Preview)
+                    </span>
+                    <span className="font-mono text-base font-bold text-white tracking-widest">
+                      {sandboxPreviewCode}
+                    </span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOtpCode(sandboxPreviewCode);
+                    setCopiedCode(true);
+                    setTimeout(() => setCopiedCode(false), 2000);
+                  }}
+                  className="px-2.5 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-mono text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  {copiedCode ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copiedCode ? 'Filled' : 'Auto Fill'}</span>
+                </button>
+              </div>
+            )}
 
             <form onSubmit={handleVerifyOtp} className="space-y-4">
               <div>
+                <label className="block text-xs font-medium text-gray-300 mb-1.5 text-center">
+                  6-Digit Verification Code
+                </label>
                 <input
                   type="text"
                   maxLength={6}
                   value={otpCode}
-                  onChange={(e) => setOtpCode(e.target.value)}
-                  placeholder="796140"
-                  className="w-full py-3 px-4 rounded-xl bg-[#080b12] border border-[#252c3d] text-center font-mono text-xl tracking-[0.5em] text-white focus:outline-none focus:border-[#d47a37] transition-all"
+                  onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  placeholder="••••••"
+                  autoFocus
+                  disabled={isVerifyingOtp}
+                  className="w-full py-3.5 px-4 rounded-xl bg-[#080b12] border border-[#252c3d] text-center font-mono text-2xl tracking-[0.6em] text-white focus:outline-none focus:border-[#d47a37] shadow-inner transition-all placeholder:text-gray-600 placeholder:tracking-widest"
                 />
               </div>
 
               {errorMsg && (
-                <div className="p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs">
-                  {errorMsg}
+                <div className="p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-center gap-2">
+                  <X className="w-4 h-4 shrink-0 text-rose-400" />
+                  <span>{errorMsg}</span>
                 </div>
               )}
 
-              <button
-                type="submit"
-                disabled={isLoading}
-                className="w-full py-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white text-xs font-bold transition-all cursor-pointer shadow-lg flex items-center justify-center gap-2"
-              >
-                <CheckCircle2 className="w-4 h-4" />
-                <span>Confirm Code & Set Profile Details</span>
-              </button>
+              {/* Resend Cooldown and Back Controls */}
+              <div className="flex items-center justify-between text-xs">
+                <button
+                  type="button"
+                  onClick={() => handleSendCode()}
+                  disabled={resendCooldown > 0 || isSendingOtp}
+                  className={`font-mono flex items-center gap-1.5 transition-colors ${
+                    resendCooldown > 0
+                      ? 'text-gray-500 cursor-not-allowed'
+                      : 'text-amber-400 hover:text-amber-300 cursor-pointer'
+                  }`}
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isSendingOtp ? 'animate-spin' : ''}`} />
+                  <span>{resendCooldown > 0 ? `Resend OTP in ${resendCooldown}s` : 'Resend One-Time Password'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStep('input');
+                    setErrorMsg(null);
+                  }}
+                  className="text-gray-400 hover:text-gray-200 transition-colors cursor-pointer text-xs"
+                >
+                  Change Gmail ID
+                </button>
+              </div>
 
               <button
-                type="button"
-                onClick={() => setStep('input')}
-                className="w-full text-center text-xs text-gray-500 hover:text-gray-300 transition-colors"
+                type="submit"
+                disabled={isVerifyingOtp || otpCode.trim().length < 4}
+                className="w-full py-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 disabled:opacity-50 text-white text-xs font-bold transition-all cursor-pointer shadow-lg flex items-center justify-center gap-2"
               >
-                Change Gmail ID
+                {isVerifyingOtp ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin text-white" />
+                    <span>Verifying Code Against Server...</span>
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>Verify OTP & Proceed</span>
+                  </>
+                )}
               </button>
             </form>
           </div>

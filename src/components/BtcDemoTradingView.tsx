@@ -8,6 +8,7 @@ import {
   TraderRanking,
   UserProfile,
   UserSession,
+  MockTradeAction,
 } from '../types';
 import {
   generateBtcCandles,
@@ -29,6 +30,8 @@ import {
   logDemoTradeHistory,
   logAiDoubtClarifiedHistory,
   buildAccountActivityContextForChatbot,
+  saveUserProfile,
+  getUserProfile,
 } from '../utils/userStorage';
 import { playClickSound, playSuccessChime } from '../utils/soundEffects';
 import {
@@ -102,6 +105,10 @@ import {
   Volume2,
   VolumeX,
   X,
+  ZoomIn,
+  ZoomOut,
+  ArrowLeft,
+  ArrowRight,
 } from 'lucide-react';
 import { getStandaloneHtmlContent } from '../standaloneHtmlSource';
 
@@ -425,18 +432,26 @@ export const BtcDemoTradingView: React.FC<BtcDemoTradingViewProps> = ({
         const scopedKey = getAccountScopedKey('lurl_btc_demo_drawings_v1', userSession?.email);
         const dr = localStorage.getItem(scopedKey);
         if (dr) setDrawings(JSON.parse(dr));
+
+        const targetEmail = userSession?.email || userProfile?.email || '';
+        const p = getUserProfile(targetEmail);
+        if (p.tradeHistory && Array.isArray(p.tradeHistory)) {
+          setUserTradeHistory(p.tradeHistory);
+        }
       } catch {}
     };
     syncAccountTradingState();
     window.addEventListener('lurl-vault-restored', syncAccountTradingState);
     window.addEventListener('lurl-account-changed', syncAccountTradingState);
     window.addEventListener('lurl-chart-updated', syncAccountTradingState);
+    window.addEventListener('lurl-profile-updated', syncAccountTradingState);
     return () => {
       window.removeEventListener('lurl-vault-restored', syncAccountTradingState);
       window.removeEventListener('lurl-account-changed', syncAccountTradingState);
       window.removeEventListener('lurl-chart-updated', syncAccountTradingState);
+      window.removeEventListener('lurl-profile-updated', syncAccountTradingState);
     };
-  }, [userSession?.email]);
+  }, [userSession?.email, userProfile?.email]);
 
   // Order Entry Form
   const [orderSide, setOrderSide] = useState<'BUY' | 'SELL'>('BUY');
@@ -446,6 +461,129 @@ export const BtcDemoTradingView: React.FC<BtcDemoTradingViewProps> = ({
   const [leverage, setLeverage] = useState<number>(5);
   const [takeProfitPrice, setTakeProfitPrice] = useState<string>('64500');
   const [stopLossPrice, setStopLossPrice] = useState<string>('60500');
+
+  // User Profile Mock Trade History (persisted in userProfile)
+  const [userTradeHistory, setUserTradeHistory] = useState<MockTradeAction[]>(() => {
+    if (userProfile?.tradeHistory && Array.isArray(userProfile.tradeHistory)) {
+      return userProfile.tradeHistory;
+    }
+    const email = userSession?.email || userProfile?.email || '';
+    const p = getUserProfile(email);
+    return p.tradeHistory && Array.isArray(p.tradeHistory) ? p.tradeHistory : [];
+  });
+  const [tradeHistoryFilter, setTradeHistoryFilter] = useState<'ALL' | 'BUY' | 'SELL' | 'CLOSED'>('ALL');
+
+  // Keep state in sync with incoming userProfile prop
+  useEffect(() => {
+    if (userProfile?.tradeHistory && Array.isArray(userProfile.tradeHistory)) {
+      setUserTradeHistory(userProfile.tradeHistory);
+    }
+  }, [userProfile?.tradeHistory]);
+
+  const filteredTradeHistory = useMemo(() => {
+    if (tradeHistoryFilter === 'ALL') return userTradeHistory;
+    if (tradeHistoryFilter === 'BUY') return userTradeHistory.filter((a) => a.type === 'BUY');
+    if (tradeHistoryFilter === 'SELL') return userTradeHistory.filter((a) => a.type === 'SELL');
+    if (tradeHistoryFilter === 'CLOSED') return userTradeHistory.filter((a) => a.status === 'CLOSED');
+    return userTradeHistory;
+  }, [userTradeHistory, tradeHistoryFilter]);
+
+  const buyCount = useMemo(() => userTradeHistory.filter((a) => a.type === 'BUY').length, [userTradeHistory]);
+  const sellCount = useMemo(() => userTradeHistory.filter((a) => a.type === 'SELL').length, [userTradeHistory]);
+  const closedCount = useMemo(() => userTradeHistory.filter((a) => a.status === 'CLOSED').length, [userTradeHistory]);
+
+  // Record a mock BUY or SELL action and persist directly to userProfile
+  const recordTradeAction = (actionData: {
+    type: 'BUY' | 'SELL';
+    symbol?: string;
+    amountUsd: number;
+    amountBtc: number;
+    priceUsd: number;
+    leverage: number;
+    action: 'OPEN_BUY' | 'OPEN_SELL' | 'CLOSE_BUY' | 'CLOSE_SELL' | 'TP_HIT' | 'SL_HIT';
+    pnlUsd?: number;
+    roiPercent?: number;
+    status: 'EXECUTED' | 'FILLED' | 'CLOSED';
+    notes?: string;
+    orderType?: 'MARKET' | 'LIMIT';
+  }) => {
+    const newAction: MockTradeAction = {
+      id: `mta-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      timestamp: Date.now(),
+      symbol: actionData.symbol || 'BTC/USD',
+      ...actionData,
+    };
+
+    setUserTradeHistory((prev) => {
+      const updated = [newAction, ...prev.filter((i) => i.id !== newAction.id)].slice(0, 300);
+      const targetEmail = userSession?.email || userProfile?.email || '';
+      const currentProf = userProfile || getUserProfile(targetEmail);
+      saveUserProfile(
+        {
+          ...currentProf,
+          tradeHistory: updated,
+        },
+        targetEmail
+      );
+      scheduleVaultSync(targetEmail);
+      return updated;
+    });
+  };
+
+  // Clear mock trade history from userProfile
+  const handleClearTradeHistory = () => {
+    playClickSound();
+    if (userTradeHistory.length === 0) return;
+    if (window.confirm('Clear all mock buy/sell trade action history from your profile vault?')) {
+      setUserTradeHistory([]);
+      const targetEmail = userSession?.email || userProfile?.email || '';
+      const currentProf = userProfile || getUserProfile(targetEmail);
+      saveUserProfile(
+        {
+          ...currentProf,
+          tradeHistory: [],
+        },
+        targetEmail
+      );
+      scheduleVaultSync(targetEmail);
+    }
+  };
+
+  // Export mock trade actions as CSV
+  const handleExportTradeActionsCsv = () => {
+    playClickSound();
+    if (userTradeHistory.length === 0) return;
+    const headers = [
+      'Action ID,Timestamp (ISO),Side,Action Type,Symbol,Price USD,Size BTC,Margin USD,Leverage,Status,Realized PnL ($),ROI (%),Notes',
+    ];
+    const rows = userTradeHistory.map((a) =>
+      [
+        a.id,
+        new Date(a.timestamp).toISOString(),
+        a.type,
+        a.action,
+        a.symbol,
+        a.priceUsd,
+        a.amountBtc,
+        a.amountUsd,
+        `${a.leverage}x`,
+        a.status,
+        a.pnlUsd !== undefined ? a.pnlUsd.toFixed(2) : '',
+        a.roiPercent !== undefined ? a.roiPercent.toFixed(2) : '',
+        `"${(a.notes || '').replace(/"/g, '""')}"`,
+      ].join(',')
+    );
+    const csv = [headers, ...rows].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `mock_trade_history_${(userSession?.email || 'user').split('@')[0]}_${Date.now()}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
 
   // Website Download in Chart Section states
   const [copiedLink, setCopiedLink] = useState<boolean>(false);
@@ -542,6 +680,20 @@ export const BtcDemoTradingView: React.FC<BtcDemoTradingViewProps> = ({
     setClosedTrades(updatedClosed);
     saveClosedTrades(updatedClosed, userSession?.email);
 
+    recordTradeAction({
+      type: 'BUY',
+      symbol: 'BTC/USD',
+      amountUsd: Math.round(account.initialBalance * 0.4),
+      amountBtc: 0.5,
+      priceUsd: currentPrice,
+      leverage: 25,
+      action: 'TP_HIT',
+      pnlUsd: tradeProfit,
+      roiPercent: boostRoi,
+      status: 'CLOSED',
+      notes: `Institutional Win Simulation (+${boostRoi}% ROI)`,
+    });
+
     const updatedAcc: DemoAccount = {
       ...account,
       balance: Math.round((account.balance + tradeProfit) * 100) / 100,
@@ -604,12 +756,27 @@ export const BtcDemoTradingView: React.FC<BtcDemoTradingViewProps> = ({
   const tenure = useMemo(() => calculateUserTenure(userProfile), [userProfile]);
   const tierStyle = useMemo(() => getTierBadgeStyle(tenure.currentTier), [tenure.currentTier]);
 
-  // Current visible candles based on live stream or replay bar
-  const visibleCandles = useMemo(() => {
-    return isLiveStream ? allCandles : allCandles.slice(0, replayIndex);
-  }, [allCandles, replayIndex, isLiveStream]);
+  // Zoom & Pan state for TradingView-style interactive inspection
+  const [zoomCandles, setZoomCandles] = useState<number>(45);
+  const [panOffset, setPanOffset] = useState<number>(0);
+  const [isPanning, setIsPanning] = useState<boolean>(false);
+  const [panStartX, setPanStartX] = useState<number>(0);
+  const [orderError, setOrderError] = useState<string | null>(null);
+  const [isAnalysisModalOpen, setIsAnalysisModalOpen] = useState<boolean>(false);
 
-  const currentCandle = visibleCandles[visibleCandles.length - 1] || allCandles[0];
+  // Current visible candles based on live stream, replay bar, and zoom/pan window
+  const visibleCandles = useMemo(() => {
+    const source = isLiveStream ? allCandles : allCandles.slice(0, replayIndex);
+    const total = source.length;
+    if (total === 0) return [];
+    const clampedPan = Math.max(0, Math.min(total - 10, panOffset));
+    const end = Math.max(Math.min(total, zoomCandles), total - clampedPan);
+    const start = Math.max(0, end - zoomCandles);
+    return source.slice(start, end);
+  }, [allCandles, replayIndex, isLiveStream, zoomCandles, panOffset]);
+
+  const latestSourceCandle = isLiveStream ? allCandles[allCandles.length - 1] : allCandles[replayIndex - 1] || allCandles[0];
+  const currentCandle = visibleCandles[visibleCandles.length - 1] || latestSourceCandle;
   const currentPrice = (isLiveStream && liveBtcSpotPrice > 0) ? liveBtcSpotPrice : (currentCandle ? currentCandle.close : 84500);
 
   // Sync initial limit & SL/TP prices to current price
@@ -734,6 +901,20 @@ export const BtcDemoTradingView: React.FC<BtcDemoTradingViewProps> = ({
           return updatedAcc;
         });
         newClosed.forEach((tc) => {
+          recordTradeAction({
+            type: tc.side === 'BUY' ? 'BUY' : 'SELL',
+            symbol: 'BTC/USD',
+            amountUsd: tc.sizeUsd,
+            amountBtc: tc.sizeBtc,
+            priceUsd: tc.exitPrice,
+            leverage: tc.leverage || 25,
+            action: tc.reason === 'TP Triggered' ? 'TP_HIT' : 'SL_HIT',
+            pnlUsd: tc.profit,
+            roiPercent: tc.roi,
+            status: 'CLOSED',
+            notes: `${tc.reason} @ $${tc.exitPrice.toLocaleString()}`,
+          });
+
           const pnlSign = tc.profit >= 0 ? '+' : '';
           logDemoTradeHistory(
             `${tc.reason}: BTC/USD ${tc.side} (${pnlSign}$${tc.profit.toLocaleString()})`,
@@ -773,9 +954,10 @@ export const BtcDemoTradingView: React.FC<BtcDemoTradingViewProps> = ({
 
     const amountUsd = parseFloat(positionAmountUsd) || 1000;
     if (amountUsd > account.balance) {
-      alert('Insufficient demo cash balance for this position margin!');
+      setOrderError(`Insufficient demo balance! Available: $${account.balance.toLocaleString()}`);
       return;
     }
+    setOrderError(null);
 
     const execPrice = orderType === 'MARKET' ? currentPrice : (parseFloat(limitPrice) || currentPrice);
     const sizeBtc = parseFloat(((amountUsd * leverage) / execPrice).toFixed(4));
@@ -817,6 +999,19 @@ export const BtcDemoTradingView: React.FC<BtcDemoTradingViewProps> = ({
     const updatedPositions = [newPos, ...positions];
     setPositions(updatedPositions);
     saveDemoPositions(updatedPositions, userSession?.email);
+
+    recordTradeAction({
+      type: orderSide,
+      symbol: 'BTC/USD',
+      amountUsd,
+      amountBtc: sizeBtc,
+      priceUsd: execPrice,
+      leverage,
+      action: orderSide === 'BUY' ? 'OPEN_BUY' : 'OPEN_SELL',
+      status: 'FILLED',
+      orderType,
+      notes: `Executed ${leverage}x ${orderSide} on BTC/USD @ $${execPrice.toLocaleString()}`,
+    });
 
     logDemoTradeHistory(
       `Opened BTC/USD ${orderSide} Position ($${amountUsd.toLocaleString()} @ ${leverage}x)`,
@@ -864,6 +1059,20 @@ export const BtcDemoTradingView: React.FC<BtcDemoTradingViewProps> = ({
     const updatedClosed = [closed, ...closedTrades];
     setClosedTrades(updatedClosed);
     saveClosedTrades(updatedClosed, userSession?.email);
+
+    recordTradeAction({
+      type: pos.side === 'BUY' ? 'BUY' : 'SELL',
+      symbol: 'BTC/USD',
+      amountUsd: pos.sizeUsd,
+      amountBtc: pos.sizeBtc,
+      priceUsd: currentPrice,
+      leverage: pos.leverage,
+      action: pos.side === 'BUY' ? 'CLOSE_BUY' : 'CLOSE_SELL',
+      pnlUsd: finalPnl,
+      roiPercent: Math.round((finalPnl / pos.sizeUsd) * 1000) / 10,
+      status: 'CLOSED',
+      notes: `Manual Close @ $${currentPrice.toLocaleString()} (${finalPnl >= 0 ? '+' : ''}$${finalPnl.toFixed(2)})`,
+    });
 
     const updatedAcc: DemoAccount = {
       ...account,
@@ -1027,6 +1236,78 @@ Trading Question: ${textToSend}`;
       maxPrice: Math.ceil(max + pad),
     };
   }, [visibleCandles, showBollinger]);
+
+  // Real-time AI Quantitative Chart Analysis
+  const chartAnalysis = useMemo(() => {
+    if (!currentCandle) return null;
+    const price = currentPrice;
+    const rsiVal = currentCandle.rsi || 50;
+    const ema20 = currentCandle.ema20 || price;
+    const ema50 = currentCandle.ema50 || price;
+
+    const isBullish = price >= ema20 && ema20 >= ema50;
+    const isBearish = price <= ema20 && ema20 <= ema50;
+    const trend = isBullish
+      ? 'Strong Bullish Expansion'
+      : isBearish
+      ? 'Bearish Momentum Retracement'
+      : 'Sideways Wyckoff Accumulation';
+
+    let support = minPrice;
+    let resistance = maxPrice;
+    if (visibleCandles.length > 5) {
+      const lows = visibleCandles.slice(-25).map((c) => c.low);
+      const highs = visibleCandles.slice(-25).map((c) => c.high);
+      support = Math.min(...lows);
+      resistance = Math.max(...highs);
+    }
+
+    const action = isBullish ? 'BUY / LONG' : isBearish ? 'SELL / SHORT' : (rsiVal < 45 ? 'BUY / LONG' : 'SELL / SHORT');
+    const tpPrice = action.startsWith('BUY')
+      ? Math.round(price * 1.032)
+      : Math.round(price * 0.968);
+    const slPrice = action.startsWith('BUY')
+      ? Math.round(Math.max(support * 0.995, price * 0.989))
+      : Math.round(Math.min(resistance * 1.005, price * 1.011));
+    const risk = Math.abs(price - slPrice);
+    const reward = Math.abs(tpPrice - price);
+    const rrRatio = risk > 0 ? (reward / risk).toFixed(2) : '3.00';
+
+    return {
+      trend,
+      price,
+      rsiVal,
+      rsiCondition:
+        rsiVal > 70
+          ? 'Overbought (>70) — Bearish Divergence Risk'
+          : rsiVal < 30
+          ? 'Oversold (<30) — High Probability Bounce Zone'
+          : 'Neutral Trend Momentum (30–70 Range)',
+      emaStatus:
+        isBullish
+          ? 'Bullish Stacking: Price > EMA20 > EMA50'
+          : isBearish
+          ? 'Bearish Stacking: Price < EMA20 < EMA50'
+          : 'EMA Compression: Breakout Anticipation',
+      support,
+      resistance,
+      action,
+      suggestedEntry: price,
+      suggestedTp: tpPrice,
+      suggestedSl: slPrice,
+      rrRatio: `1 : ${rrRatio}`,
+    };
+  }, [currentCandle, currentPrice, visibleCandles, minPrice, maxPrice]);
+
+  const handleApplyAnalysisToOrder = () => {
+    if (!chartAnalysis) return;
+    playSuccessChime();
+    setOrderSide(chartAnalysis.action.startsWith('BUY') ? 'BUY' : 'SELL');
+    setLimitPrice(String(chartAnalysis.suggestedEntry));
+    setTakeProfitPrice(String(chartAnalysis.suggestedTp));
+    setStopLossPrice(String(chartAnalysis.suggestedSl));
+    setIsAnalysisModalOpen(false);
+  };
 
   const priceToY = (price: number) => {
     const range = maxPrice - minPrice || 1;
@@ -1244,11 +1525,42 @@ Trading Question: ${textToSend}`;
     return { candleIndex, price, svgX, svgY };
   };
 
+  const handleSvgWheel = (e: React.WheelEvent<SVGSVGElement>) => {
+    e.preventDefault();
+    if (e.deltaY < 0) {
+      setZoomCandles((prev) => Math.max(15, prev - 5));
+    } else {
+      setZoomCandles((prev) => Math.min(160, prev + 5));
+    }
+  };
+
+  const handleSvgMouseDown = (e: React.MouseEvent<SVGSVGElement>) => {
+    if (activeDrawingTool === 'cursor') {
+      setIsPanning(true);
+      setPanStartX(e.clientX);
+    }
+  };
+
+  const handleSvgMouseUp = () => {
+    setIsPanning(false);
+  };
+
   const handleSvgMouseMove = (e: React.MouseEvent<SVGSVGElement>) => {
     const coords = getSvgCoordinates(e);
     setCurrentHoverCoords(coords);
     if (visibleCandles[coords.candleIndex]) {
       setHoveredCandle(visibleCandles[coords.candleIndex]);
+    }
+
+    if (isPanning && activeDrawingTool === 'cursor') {
+      const delta = e.clientX - panStartX;
+      if (Math.abs(delta) > 8) {
+        setPanOffset((prev) => {
+          const shift = delta > 0 ? 1 : -1;
+          return Math.max(0, Math.min(allCandles.length - 15, prev + shift));
+        });
+        setPanStartX(e.clientX);
+      }
     }
   };
 
@@ -1930,6 +2242,62 @@ Trading Question: ${textToSend}`;
             >
               <TrendingUp className="w-3 h-3 text-emerald-400" />
               <span>Profit Curve</span>
+            </button>
+
+            {/* TradingView Zoom Controls */}
+            <div className="flex items-center gap-0.5 bg-[#121622] p-0.5 border border-[#1f2638] rounded">
+              <button
+                type="button"
+                id="chart-zoom-in-btn"
+                onClick={() => {
+                  playClickSound();
+                  setZoomCandles((prev) => Math.max(12, prev - 8));
+                }}
+                title="Zoom In (Enlarge Candlesticks)"
+                className="p-1 hover:bg-[#1e2638] text-[#9ca3af] hover:text-white transition-colors cursor-pointer"
+              >
+                <ZoomIn className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                id="chart-zoom-out-btn"
+                onClick={() => {
+                  playClickSound();
+                  setZoomCandles((prev) => Math.min(180, prev + 8));
+                }}
+                title="Zoom Out (View More History)"
+                className="p-1 hover:bg-[#1e2638] text-[#9ca3af] hover:text-white transition-colors cursor-pointer"
+              >
+                <ZoomOut className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                id="chart-zoom-fit-btn"
+                onClick={() => {
+                  playClickSound();
+                  setZoomCandles(45);
+                  setPanOffset(0);
+                }}
+                title="Reset Zoom & Pan (Auto Fit to 100%)"
+                className="px-1.5 py-0.5 text-[10px] font-bold text-amber-400 hover:text-amber-300 hover:bg-[#1e2638] rounded transition-colors cursor-pointer"
+              >
+                Fit
+              </button>
+            </div>
+
+            {/* Instant Technical Analysis Button */}
+            <button
+              type="button"
+              id="chart-analyse-btn"
+              onClick={() => {
+                playClickSound();
+                setIsAnalysisModalOpen(true);
+              }}
+              title="Analyse Bitcoin Chart: Real-time indicators, trend direction & institutional trade plan"
+              className="px-2 py-1 bg-gradient-to-r from-cyan-900/60 via-blue-900/50 to-indigo-900/60 hover:from-cyan-800/80 hover:to-blue-800/80 text-cyan-200 hover:text-white border border-cyan-500/50 rounded flex items-center gap-1.5 text-[10px] font-bold shadow-sm transition-all cursor-pointer"
+            >
+              <Activity className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
+              <span>Analyse Chart</span>
             </button>
 
             {/* Snapshot */}
@@ -2708,10 +3076,14 @@ Trading Question: ${textToSend}`;
               <div className="relative flex-1 overflow-hidden" ref={containerRef}>
                 <svg
                   viewBox={`0 0 ${chartWidth} ${chartHeight}`}
-                  className="w-full h-auto cursor-crosshair select-none"
+                  className={`w-full h-auto select-none ${isPanning ? 'cursor-grabbing' : 'cursor-crosshair'}`}
+                  onWheel={handleSvgWheel}
+                  onMouseDown={handleSvgMouseDown}
+                  onMouseUp={handleSvgMouseUp}
                   onMouseMove={handleSvgMouseMove}
                   onClick={handleSvgClick}
                   onMouseLeave={() => {
+                    setIsPanning(false);
                     setHoveredCandle(null);
                     setCurrentHoverCoords(null);
                   }}
@@ -2846,25 +3218,30 @@ Trading Question: ${textToSend}`;
                     ${currentPrice.toLocaleString()}
                   </text>
 
-                  {/* Active Open Positions Entry Level Lines on Chart */}
+                  {/* Active Open Positions Entry, TP, and SL Lines on Chart */}
                   {positions.map((pos) => {
                     const y = priceToY(pos.entryPrice);
                     const color = pos.side === 'BUY' ? '#22c55e' : '#ef4444';
+                    const tpY = pos.takeProfit ? priceToY(pos.takeProfit) : null;
+                    const slY = pos.stopLoss ? priceToY(pos.stopLoss) : null;
+                    const liqY = pos.liquidationPrice ? priceToY(pos.liquidationPrice) : null;
+
                     return (
                       <g key={pos.id}>
+                        {/* Entry Line */}
                         <line
                           x1={chartPadding.left}
                           y1={y}
                           x2={chartWidth - chartPadding.right}
                           y2={y}
                           stroke={color}
-                          strokeWidth="1"
+                          strokeWidth="1.5"
                           strokeDasharray="4 2"
                         />
                         <rect
                           x={chartPadding.left + 5}
                           y={y - 7}
-                          width={90}
+                          width={110}
                           height={14}
                           fill={pos.side === 'BUY' ? '#14532d' : '#7f1d1d'}
                           stroke={color}
@@ -2877,11 +3254,155 @@ Trading Question: ${textToSend}`;
                           fontFamily="monospace"
                           fontWeight="bold"
                         >
-                          {pos.side} {pos.leverage}x @ ${pos.entryPrice}
+                          {pos.side} {pos.leverage}x @ ${pos.entryPrice.toLocaleString()}
                         </text>
+
+                        {/* Take Profit Target Line */}
+                        {tpY !== null && (
+                          <g>
+                            <line
+                              x1={chartPadding.left}
+                              y1={tpY}
+                              x2={chartWidth - chartPadding.right}
+                              y2={tpY}
+                              stroke="#10b981"
+                              strokeWidth="1.5"
+                              strokeDasharray="3 3"
+                            />
+                            <rect
+                              x={chartWidth - chartPadding.right - 95}
+                              y={tpY - 7}
+                              width={90}
+                              height={14}
+                              fill="#064e3b"
+                              stroke="#10b981"
+                            />
+                            <text
+                              x={chartWidth - chartPadding.right - 90}
+                              y={tpY + 3}
+                              fill="#6ee7b7"
+                              fontSize="8"
+                              fontFamily="monospace"
+                              fontWeight="bold"
+                            >
+                              TP: ${pos.takeProfit?.toLocaleString()}
+                            </text>
+                          </g>
+                        )}
+
+                        {/* Stop Loss Target Line */}
+                        {slY !== null && (
+                          <g>
+                            <line
+                              x1={chartPadding.left}
+                              y1={slY}
+                              x2={chartWidth - chartPadding.right}
+                              y2={slY}
+                              stroke="#ef4444"
+                              strokeWidth="1.5"
+                              strokeDasharray="3 3"
+                            />
+                            <rect
+                              x={chartWidth - chartPadding.right - 95}
+                              y={slY - 7}
+                              width={90}
+                              height={14}
+                              fill="#450a0a"
+                              stroke="#ef4444"
+                            />
+                            <text
+                              x={chartWidth - chartPadding.right - 90}
+                              y={slY + 3}
+                              fill="#fca5a5"
+                              fontSize="8"
+                              fontFamily="monospace"
+                              fontWeight="bold"
+                            >
+                              SL: ${pos.stopLoss?.toLocaleString()}
+                            </text>
+                          </g>
+                        )}
+
+                        {/* Liquidation Warning Line */}
+                        {liqY !== null && (
+                          <g opacity="0.7">
+                            <line
+                              x1={chartPadding.left}
+                              y1={liqY}
+                              x2={chartWidth - chartPadding.right}
+                              y2={liqY}
+                              stroke="#f97316"
+                              strokeWidth="1"
+                              strokeDasharray="2 3"
+                            />
+                            <rect
+                              x={chartPadding.left + 5}
+                              y={liqY - 6}
+                              width={80}
+                              height={12}
+                              fill="#431407"
+                              stroke="#f97316"
+                            />
+                            <text
+                              x={chartPadding.left + 8}
+                              y={liqY + 3}
+                              fill="#fdba74"
+                              fontSize="7"
+                              fontFamily="monospace"
+                            >
+                              Liq: ${pos.liquidationPrice?.toLocaleString()}
+                            </text>
+                          </g>
+                        )}
                       </g>
                     );
                   })}
+
+                  {/* Proposed Order Ticket TP / SL Preview Lines */}
+                  {takeProfitPrice && parseFloat(takeProfitPrice) > 0 && (
+                    <g opacity="0.65">
+                      <line
+                        x1={chartPadding.left}
+                        y1={priceToY(parseFloat(takeProfitPrice))}
+                        x2={chartWidth - chartPadding.right}
+                        y2={priceToY(parseFloat(takeProfitPrice))}
+                        stroke="#34d399"
+                        strokeWidth="1"
+                        strokeDasharray="2 2"
+                      />
+                      <text
+                        x={chartWidth - chartPadding.right - 80}
+                        y={priceToY(parseFloat(takeProfitPrice)) - 3}
+                        fill="#34d399"
+                        fontSize="7"
+                        fontFamily="monospace"
+                      >
+                        Proposed TP
+                      </text>
+                    </g>
+                  )}
+                  {stopLossPrice && parseFloat(stopLossPrice) > 0 && (
+                    <g opacity="0.65">
+                      <line
+                        x1={chartPadding.left}
+                        y1={priceToY(parseFloat(stopLossPrice))}
+                        x2={chartWidth - chartPadding.right}
+                        y2={priceToY(parseFloat(stopLossPrice))}
+                        stroke="#f87171"
+                        strokeWidth="1"
+                        strokeDasharray="2 2"
+                      />
+                      <text
+                        x={chartWidth - chartPadding.right - 80}
+                        y={priceToY(parseFloat(stopLossPrice)) - 3}
+                        fill="#f87171"
+                        fontSize="7"
+                        fontFamily="monospace"
+                      >
+                        Proposed SL
+                      </text>
+                    </g>
+                  )}
 
                   {/* User Drawings Layer (TradingView Unlocked Capabilities) */}
                   {showDrawings &&
@@ -3361,6 +3882,67 @@ Trading Question: ${textToSend}`;
                     </g>
                   )}
                 </svg>
+
+                {/* Floating On-Chart Zoom & Pan Navigation Dock */}
+                <div className="absolute bottom-3 left-4 z-20 flex items-center gap-1 bg-[#090d16]/85 backdrop-blur-md p-1 border border-[#252c3d]/80 rounded-lg shadow-xl font-mono select-none">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      playClickSound();
+                      setZoomCandles((prev) => Math.max(12, prev - 8));
+                    }}
+                    title="Zoom In (Candles appear larger)"
+                    className="p-1 rounded hover:bg-[#1a2233] text-gray-300 hover:text-white transition-colors cursor-pointer"
+                  >
+                    <ZoomIn className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      playClickSound();
+                      setZoomCandles((prev) => Math.min(180, prev + 8));
+                    }}
+                    title="Zoom Out (View more historical candles)"
+                    className="p-1 rounded hover:bg-[#1a2233] text-gray-300 hover:text-white transition-colors cursor-pointer"
+                  >
+                    <ZoomOut className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      playClickSound();
+                      setZoomCandles(45);
+                      setPanOffset(0);
+                    }}
+                    title="Reset Zoom & Pan (100% Fit)"
+                    className="px-1.5 py-0.5 rounded text-[10px] font-bold text-amber-400 hover:text-amber-300 hover:bg-[#1a2233] transition-colors cursor-pointer"
+                  >
+                    Fit
+                  </button>
+                  <div className="h-3 w-px bg-[#252c3d] mx-0.5" />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      playClickSound();
+                      setPanOffset((prev) => Math.min(allCandles.length - 15, prev + 10));
+                    }}
+                    title="Pan Left (View Earlier History)"
+                    className="p-1 rounded hover:bg-[#1a2233] text-gray-300 hover:text-white transition-colors cursor-pointer"
+                  >
+                    <ArrowLeft className="w-3 h-3" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      playClickSound();
+                      setPanOffset((prev) => Math.max(0, prev - 10));
+                    }}
+                    title="Pan Right (View Recent Candles)"
+                    className="p-1 rounded hover:bg-[#1a2233] text-gray-300 hover:text-white transition-colors cursor-pointer"
+                  >
+                    <ArrowRight className="w-3 h-3" />
+                  </button>
+                </div>
               </div>
 
               {/* Right Vertical Slidebar Rail (TradingView layout) */}
@@ -3802,6 +4384,59 @@ Trading Question: ${textToSend}`;
               >
                 EXECUTE DEMO {orderSide} (BTC/USD)
               </button>
+
+              {/* Recent Mock Actions Mini-Widget (Profile Vault) */}
+              <div className="pt-3 border-t border-[#1f2638] space-y-2">
+                <div className="flex items-center justify-between text-[11px] font-mono">
+                  <span className="text-[#9ca3af] flex items-center gap-1">
+                    <Clock className="w-3 h-3 text-[#f8b179]" /> Recent Mock Actions:
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      playClickSound();
+                      setBottomTab('history');
+                    }}
+                    className="text-[#f8b179] hover:text-white cursor-pointer text-[10px] font-bold"
+                  >
+                    View All ({userTradeHistory.length}) →
+                  </button>
+                </div>
+                {userTradeHistory.length === 0 ? (
+                  <div className="text-[10px] text-gray-500 italic font-mono py-1">
+                    No mock actions logged yet. Execute a BUY or SELL above.
+                  </div>
+                ) : (
+                  <div className="space-y-1.5">
+                    {userTradeHistory.slice(0, 3).map((act) => {
+                      const isBuy = act.type === 'BUY';
+                      const dateStr = new Date(act.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+                      return (
+                        <div
+                          key={act.id}
+                          className="p-1.5 sm:p-2 rounded bg-[#090c12] border border-[#1a202c] flex items-center justify-between text-[10px] font-mono"
+                        >
+                          <div className="flex items-center gap-1.5">
+                            <span
+                              className={`px-1.5 py-0.5 rounded font-bold text-[9px] ${
+                                isBuy ? 'bg-emerald-950 text-emerald-300' : 'bg-red-950 text-red-300'
+                              }`}
+                            >
+                              {act.type}
+                            </span>
+                            <span className="text-white font-medium">${act.priceUsd.toLocaleString()}</span>
+                          </div>
+                          <div className="flex items-center gap-1.5 text-gray-400 text-[9px]">
+                            <span>{act.amountBtc} BTC</span>
+                            <span className="text-gray-600">•</span>
+                            <span>{dateStr}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             </form>
           </div>
         </div>
@@ -3825,13 +4460,17 @@ Trading Question: ${textToSend}`;
             <button
               type="button"
               onClick={() => setBottomTab('history')}
-              className={`py-2.5 px-3 font-bold border-b-2 transition-all cursor-pointer whitespace-nowrap ${
+              className={`py-2.5 px-3 font-bold border-b-2 transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
                 bottomTab === 'history'
                   ? 'border-[#f8b179] text-white bg-[#141824]'
                   : 'border-transparent text-[#9ca3af] hover:text-white'
               }`}
             >
-              Trade History ({closedTrades.length})
+              <Clock className="w-3.5 h-3.5 text-[#f8b179]" />
+              <span>Trade History</span>
+              <span className="text-[10px] px-1.5 py-0.2 rounded bg-amber-500/20 text-[#f8b179] font-bold">
+                {userTradeHistory.length || closedTrades.length}
+              </span>
             </button>
 
             <button
@@ -3954,8 +4593,261 @@ Trading Question: ${textToSend}`;
           {bottomTab === 'history' && (
             <div className="p-3 sm:p-4">
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-                {/* Main Column (8 cols): Trade Performance Summary Card & Trade History Table */}
-                <div className="lg:col-span-8 space-y-4">
+                {/* Main Column (8 cols): Dedicated Trade History Section + Summary Card + Closed Ledger */}
+                <div className="lg:col-span-8 space-y-5">
+                  {/* Dedicated Trade History Section: User Profile Mock Buy/Sell Actions */}
+                  <div className="border border-[#1f2638] rounded-2xl bg-[#0b0e16] shadow-2xl p-4 sm:p-5 space-y-4">
+                    {/* Header with Title and User Profile Vault Status */}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[#1f2638]">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h3 className="text-sm font-['Cinzel'] font-bold text-white tracking-wide flex items-center gap-2 uppercase">
+                            <Clock className="w-4 h-4 text-[#f8b179]" />
+                            <span>Recent Mock Buy / Sell Actions</span>
+                          </h3>
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 flex items-center gap-1 font-semibold">
+                            <Shield className="w-3 h-3 text-emerald-400" />
+                            <span>Persisted in User Profile Vault</span>
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-[#9ca3af]">
+                          Audit history of all recent mock buy and sell orders, limit executions, and position closures stored in{' '}
+                          <strong className="text-white font-mono">{userProfile?.email || userSession?.email || 'Active User Profile'}</strong>.
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <button
+                          type="button"
+                          onClick={handleExportTradeActionsCsv}
+                          disabled={userTradeHistory.length === 0}
+                          className="px-2.5 py-1.5 rounded-lg bg-[#141926] hover:bg-[#1f273b] disabled:opacity-40 text-xs font-mono font-bold text-[#f8b179] border border-[#d47a37]/40 flex items-center gap-1.5 cursor-pointer transition-colors"
+                          title="Export mock actions as CSV"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          <span>Export CSV</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={handleClearTradeHistory}
+                          disabled={userTradeHistory.length === 0}
+                          className="px-2.5 py-1.5 rounded-lg bg-[#141926] hover:bg-rose-950/40 disabled:opacity-40 text-xs font-mono font-bold text-rose-300 border border-rose-900/40 flex items-center gap-1.5 cursor-pointer transition-colors"
+                          title="Clear trade history"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Clear History</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Filter Ribbon & Counters */}
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="flex items-center gap-1.5 flex-wrap text-xs font-mono">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            playClickSound();
+                            setTradeHistoryFilter('ALL');
+                          }}
+                          className={`px-2.5 py-1 rounded-lg border font-bold transition-all cursor-pointer ${
+                            tradeHistoryFilter === 'ALL'
+                              ? 'bg-[#d47a37] text-white border-[#f8b179]'
+                              : 'bg-[#121622] text-[#9ca3af] hover:text-white border-[#1f2638]'
+                          }`}
+                        >
+                          All Actions ({userTradeHistory.length})
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            playClickSound();
+                            setTradeHistoryFilter('BUY');
+                          }}
+                          className={`px-2.5 py-1 rounded-lg border font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                            tradeHistoryFilter === 'BUY'
+                              ? 'bg-emerald-600 text-white border-emerald-400'
+                              : 'bg-[#121622] text-emerald-400 hover:text-white border-[#1f2638]'
+                          }`}
+                        >
+                          <TrendingUp className="w-3 h-3" />
+                          <span>BUY Actions ({buyCount})</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            playClickSound();
+                            setTradeHistoryFilter('SELL');
+                          }}
+                          className={`px-2.5 py-1 rounded-lg border font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                            tradeHistoryFilter === 'SELL'
+                              ? 'bg-red-600 text-white border-red-400'
+                              : 'bg-[#121622] text-red-400 hover:text-white border-[#1f2638]'
+                          }`}
+                        >
+                          <TrendingDown className="w-3 h-3" />
+                          <span>SELL Actions ({sellCount})</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            playClickSound();
+                            setTradeHistoryFilter('CLOSED');
+                          }}
+                          className={`px-2.5 py-1 rounded-lg border font-bold transition-all cursor-pointer ${
+                            tradeHistoryFilter === 'CLOSED'
+                              ? 'bg-purple-600 text-white border-purple-400'
+                              : 'bg-[#121622] text-purple-300 hover:text-white border-[#1f2638]'
+                          }`}
+                        >
+                          Closed Exits ({closedCount})
+                        </button>
+                      </div>
+
+                      <div className="text-[10px] font-mono text-gray-400">
+                        Object property: <strong className="text-white">userProfile.tradeHistory</strong>
+                      </div>
+                    </div>
+
+                    {/* Table of Mock Actions */}
+                    <div className="overflow-x-auto border border-[#1f2638] rounded-xl bg-[#090c12]">
+                      {filteredTradeHistory.length === 0 ? (
+                        <div className="py-10 px-4 text-center font-mono space-y-2">
+                          <div className="text-sm font-semibold text-white">No Mock Actions Found</div>
+                          <div className="text-xs text-[#9ca3af] max-w-md mx-auto">
+                            {tradeHistoryFilter === 'ALL'
+                              ? 'Execute a BUY or SELL order above. Every action is automatically tracked with timestamp, price, volume, and persisted in your user profile.'
+                              : `No mock trades found matching "${tradeHistoryFilter}".`}
+                          </div>
+                        </div>
+                      ) : (
+                        <table className="w-full text-left text-xs font-mono border-collapse">
+                          <thead>
+                            <tr className="border-b border-[#1f2638] bg-[#121624] text-[10px] text-[#9ca3af] uppercase tracking-wider">
+                              <th className="py-2.5 px-3">Timestamp</th>
+                              <th className="py-2.5 px-3">Side &amp; Action</th>
+                              <th className="py-2.5 px-3">Symbol</th>
+                              <th className="py-2.5 px-3">Exec Price</th>
+                              <th className="py-2.5 px-3">Volume &amp; Margin</th>
+                              <th className="py-2.5 px-3">Status</th>
+                              <th className="py-2.5 px-3 text-right">PnL / Outcome</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-[#161c2b]">
+                            {filteredTradeHistory.map((act) => {
+                              const date = new Date(act.timestamp);
+                              const isBuy = act.type === 'BUY';
+                              const isClosed = act.status === 'CLOSED';
+                              const actionLabel =
+                                act.action === 'OPEN_BUY'
+                                  ? 'BUY ORDER OPEN'
+                                  : act.action === 'OPEN_SELL'
+                                  ? 'SELL ORDER OPEN'
+                                  : act.action === 'CLOSE_BUY'
+                                  ? 'CLOSE LONG'
+                                  : act.action === 'CLOSE_SELL'
+                                  ? 'CLOSE SHORT'
+                                  : act.action === 'TP_HIT'
+                                  ? 'TAKE PROFIT'
+                                  : act.action === 'SL_HIT'
+                                  ? 'STOP LOSS'
+                                  : act.action;
+
+                              return (
+                                <tr key={act.id} className="hover:bg-[#121726]/60 transition-colors">
+                                  {/* Timestamp */}
+                                  <td className="py-2.5 px-3 whitespace-nowrap">
+                                    <div className="font-semibold text-white">
+                                      {date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })},{' '}
+                                      {date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                                    </div>
+                                    <div className="text-[10px] text-[#6b7280]">
+                                      ID: {act.id.slice(0, 14)}...
+                                    </div>
+                                  </td>
+
+                                  {/* Side & Action */}
+                                  <td className="py-2.5 px-3 whitespace-nowrap">
+                                    <div className="flex items-center gap-2">
+                                      <span
+                                        className={`px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1 ${
+                                          isBuy
+                                            ? 'bg-emerald-950 text-emerald-300 border border-emerald-700/50'
+                                            : 'bg-red-950 text-red-300 border border-red-700/50'
+                                        }`}
+                                      >
+                                        {isBuy ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+                                        <span>{act.type}</span>
+                                      </span>
+                                      <span className="text-[11px] font-bold text-gray-300">
+                                        {actionLabel}
+                                      </span>
+                                    </div>
+                                  </td>
+
+                                  {/* Symbol */}
+                                  <td className="py-2.5 px-3 whitespace-nowrap text-white font-bold">
+                                    {act.symbol || 'BTC/USD'}
+                                  </td>
+
+                                  {/* Execution Price */}
+                                  <td className="py-2.5 px-3 whitespace-nowrap">
+                                    <div className="text-white font-semibold">
+                                      ${act.priceUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    </div>
+                                    <div className="text-[10px] text-[#6b7280]">{act.orderType || 'MARKET'}</div>
+                                  </td>
+
+                                  {/* Volume & Margin */}
+                                  <td className="py-2.5 px-3 whitespace-nowrap">
+                                    <div className="text-[#cbd5e1]">{act.amountBtc} BTC</div>
+                                    <div className="text-[10px] text-[#9ca3af]">
+                                      ${act.amountUsd.toLocaleString()} @ {act.leverage}x
+                                    </div>
+                                  </td>
+
+                                  {/* Status */}
+                                  <td className="py-2.5 px-3 whitespace-nowrap">
+                                    <span
+                                      className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
+                                        isClosed
+                                          ? 'bg-purple-950/60 text-purple-300 border-purple-800/40'
+                                          : 'bg-cyan-950/60 text-cyan-300 border-cyan-800/40'
+                                      }`}
+                                    >
+                                      {act.status}
+                                    </span>
+                                  </td>
+
+                                  {/* PnL / Outcome */}
+                                  <td className="py-2.5 px-3 whitespace-nowrap text-right">
+                                    {act.pnlUsd !== undefined ? (
+                                      <div>
+                                        <div className={`font-bold text-xs ${act.pnlUsd >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                          {act.pnlUsd >= 0 ? '+' : ''}${act.pnlUsd.toFixed(2)}
+                                        </div>
+                                        {act.roiPercent !== undefined && (
+                                          <div className={`text-[10px] ${act.roiPercent >= 0 ? 'text-emerald-400/80' : 'text-red-400/80'}`}>
+                                            {act.roiPercent >= 0 ? '+' : ''}{act.roiPercent.toFixed(1)}% ROI
+                                          </div>
+                                        )}
+                                      </div>
+                                    ) : (
+                                      <span className="text-[11px] text-cyan-400 font-semibold">Active Exposure</span>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+                  </div>
+
                   {/* Trade Performance Summary Card */}
                   <TradePerformanceSummary
                     closedTrades={closedTrades}
@@ -4241,6 +5133,170 @@ Trading Question: ${textToSend}`;
                 className="px-4 py-1.5 text-xs font-bold text-white bg-[#d47a37] hover:bg-[#e08a46] cursor-pointer"
               >
                 Apply & Reset
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Institutional Technical Analysis & Market Structure Modal */}
+      {isAnalysisModalOpen && chartAnalysis && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-md overflow-y-auto">
+          <div className="w-full max-w-xl bg-[#0b0e17] border border-[#252c3d] rounded-2xl p-5 sm:p-6 space-y-5 shadow-[0_25px_60px_rgba(0,0,0,0.9)] my-auto font-mono">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-[#1f2638] pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-cyan-500/15 border border-cyan-500/40 flex items-center justify-center text-cyan-400">
+                  <Activity className="w-5 h-5 animate-pulse" />
+                </div>
+                <div>
+                  <div className="text-[10px] font-bold text-cyan-400 uppercase tracking-wider">
+                    QUANTITATIVE ENGINE • BTC/USDT {timeframe}
+                  </div>
+                  <h3 className="text-base font-bold font-['Cinzel'] text-white">
+                    Institutional Technical Analysis
+                  </h3>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsAnalysisModalOpen(false)}
+                className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-[#1a2233] cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Current Price & Master Bias Banner */}
+            <div className="p-3.5 rounded-xl bg-[#121622] border border-[#252c3d] flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <span className="text-[10px] text-gray-400 block uppercase">Real-Time Spot Price</span>
+                <span className="text-xl font-bold text-white">
+                  ${chartAnalysis.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+              </div>
+
+              <div className="text-right">
+                <span className="text-[10px] text-gray-400 block uppercase">Algorithmic Bias</span>
+                <span
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border ${
+                    chartAnalysis.action.startsWith('BUY')
+                      ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40'
+                      : 'bg-rose-500/15 text-rose-300 border-rose-500/40'
+                  }`}
+                >
+                  <span className="w-2 h-2 rounded-full bg-current animate-ping" />
+                  <span>{chartAnalysis.trend}</span>
+                </span>
+              </div>
+            </div>
+
+            {/* Core Indicators Matrix */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+              {/* Card 1: Moving Averages Trend */}
+              <div className="p-3 rounded-xl bg-[#0f131f] border border-[#1f2638] space-y-1.5">
+                <div className="flex items-center justify-between text-[11px] font-bold text-gray-400">
+                  <span>MOVING AVERAGES</span>
+                  <span className="text-[#f8b179]">EMA 20 / 50 / 200</span>
+                </div>
+                <div className="text-white font-semibold">
+                  {chartAnalysis.emaStatus}
+                </div>
+                <div className="text-[11px] text-[#9ca3af]">
+                  EMA 20: ${currentCandle?.ema20 ? currentCandle.ema20.toLocaleString() : chartAnalysis.price.toLocaleString()}
+                </div>
+              </div>
+
+              {/* Card 2: RSI Momentum */}
+              <div className="p-3 rounded-xl bg-[#0f131f] border border-[#1f2638] space-y-1.5">
+                <div className="flex items-center justify-between text-[11px] font-bold text-gray-400">
+                  <span>RELATIVE STRENGTH</span>
+                  <span className="text-emerald-400 font-bold">RSI (14): {chartAnalysis.rsiVal.toFixed(1)}</span>
+                </div>
+                <div className="text-white font-semibold truncate">
+                  {chartAnalysis.rsiCondition}
+                </div>
+                <div className="w-full bg-[#1b2234] h-1.5 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-gradient-to-r from-emerald-500 via-amber-400 to-rose-500"
+                    style={{ width: `${Math.min(100, Math.max(0, chartAnalysis.rsiVal))}%` }}
+                  />
+                </div>
+              </div>
+
+              {/* Card 3: Key Liquidity Demand Support */}
+              <div className="p-3 rounded-xl bg-[#0f131f] border border-[#1f2638] space-y-1">
+                <span className="text-[10px] text-gray-400 uppercase block">Demand / Support Zone</span>
+                <span className="text-emerald-400 font-bold text-sm">
+                  ${chartAnalysis.support.toLocaleString()}
+                </span>
+                <p className="text-[10px] text-gray-400">
+                  Institutional order block and fair-value liquidity demand.
+                </p>
+              </div>
+
+              {/* Card 4: Key Liquidity Supply Resistance */}
+              <div className="p-3 rounded-xl bg-[#0f131f] border border-[#1f2638] space-y-1">
+                <span className="text-[10px] text-gray-400 uppercase block">Supply / Resistance Pool</span>
+                <span className="text-rose-400 font-bold text-sm">
+                  ${chartAnalysis.resistance.toLocaleString()}
+                </span>
+                <p className="text-[10px] text-gray-400">
+                  Overhead buy-side liquidity sweep & distribution ceiling.
+                </p>
+              </div>
+            </div>
+
+            {/* Recommended Institutional Trade Plan (1:3 R:R Setup) */}
+            <div className="p-4 rounded-xl bg-gradient-to-br from-[#121826] to-[#0e121d] border border-amber-500/40 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] font-bold">
+                    RECOMMENDED EXECUTION
+                  </span>
+                  <span className="text-xs font-bold text-white">
+                    Setup: {chartAnalysis.action}
+                  </span>
+                </div>
+                <span className="text-xs font-bold text-amber-300">
+                  R:R {chartAnalysis.rrRatio}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                <div className="p-2 rounded-lg bg-[#182032] border border-[#252c3d]">
+                  <span className="text-[10px] text-gray-400 block uppercase">Entry</span>
+                  <span className="font-bold text-white">${chartAnalysis.suggestedEntry.toLocaleString()}</span>
+                </div>
+                <div className="p-2 rounded-lg bg-emerald-950/40 border border-emerald-500/40">
+                  <span className="text-[10px] text-emerald-400 block uppercase">Take Profit (TP)</span>
+                  <span className="font-bold text-emerald-300">${chartAnalysis.suggestedTp.toLocaleString()}</span>
+                </div>
+                <div className="p-2 rounded-lg bg-rose-950/40 border border-rose-500/40">
+                  <span className="text-[10px] text-rose-400 block uppercase">Stop Loss (SL)</span>
+                  <span className="font-bold text-rose-300">${chartAnalysis.suggestedSl.toLocaleString()}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-[#1f2638]">
+              <button
+                type="button"
+                onClick={() => setIsAnalysisModalOpen(false)}
+                className="px-4 py-2 rounded-xl text-xs text-[#9ca3af] hover:text-white bg-[#141824] border border-[#252c3d] cursor-pointer"
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                id="apply-analysis-to-order-btn"
+                onClick={handleApplyAnalysisToOrder}
+                className="px-5 py-2 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-amber-600 via-[#d47a37] to-amber-700 hover:from-amber-500 hover:to-amber-600 shadow-[0_10px_25px_rgba(212,122,55,0.4)] flex items-center gap-2 cursor-pointer"
+              >
+                <Check className="w-4 h-4 text-white" />
+                <span>Apply Setup to Order Form</span>
               </button>
             </div>
           </div>

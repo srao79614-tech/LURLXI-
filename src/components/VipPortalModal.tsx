@@ -141,10 +141,7 @@ export const VipPortalModal: React.FC<VipPortalModalProps> = ({
       } catch (err) {}
       onSaveSettings(settings);
 
-      const targetEmail =
-        userSession?.email && isPrivilegedAdminEmail(userSession.email)
-          ? userSession.email
-          : 'srao79614@gmail.com';
+      const targetEmail = userSession?.email || 'vip.executive@gmail.com';
 
       const response = await fetch('/api/vip/settings', {
         method: 'POST',

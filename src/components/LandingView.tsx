@@ -43,21 +43,14 @@ export const LandingView: React.FC<LandingViewProps> = ({
   userSession,
   userProfile,
 }) => {
-  const isVerified = Boolean(userSession?.isVerified);
+  const isVerified = Boolean(
+    (userSession?.isVerified || userSession?.verified) &&
+    userSession?.email &&
+    /^[a-z0-9._%+-]+@gmail\.com$/i.test(userSession.email.trim())
+  );
 
   const handleEnter = () => {
     if (!isVerified) {
-      playClickSound();
-      onOpenAuth();
-      return;
-    }
-    // For first-time verification, ensure age profile is completed
-    const cleanEmail = userSession?.email?.toLowerCase().trim();
-    const hasAgeProfile = cleanEmail && (
-      localStorage.getItem(`lurl_age_profile_done_${cleanEmail}`) === 'true' ||
-      Boolean(userProfile?.age && Number(userProfile.age) >= 18)
-    );
-    if (!hasAgeProfile) {
       playClickSound();
       onOpenAuth();
       return;
@@ -77,8 +70,8 @@ export const LandingView: React.FC<LandingViewProps> = ({
       <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#d47a37]/15 text-[#f8b179] text-xs font-semibold border border-[#d47a37]/30 mb-4">
         <Sparkles className="w-3.5 h-3.5" />{' '}
         {isVerified
-          ? 'Step 1 Complete: Gmail ID Verified ✓ • Step 2: Complete Age Profile & Open Dashboard'
-          : 'Step 1 of 2: Verify Your Gmail ID First (Dashboard & Navigator Tabs Unlock After Verification)'}
+          ? 'Gmail ID Verified ✓ • Permanent VIP Dashboard Unlocked'
+          : '1-Time Gmail Verification • Unlocks Full Executive Platform & Trading Terminal'}
       </div>
 
       <h1 className="font-['Cinzel'] text-3xl sm:text-5xl lg:text-6xl font-extrabold text-white tracking-wide max-w-4xl leading-tight">
@@ -89,7 +82,7 @@ export const LandingView: React.FC<LandingViewProps> = ({
         The definitive operating system for <strong className="text-white">Precision Trading</strong>, <strong className="text-white">AI Dropshipping</strong>, <strong className="text-white">Enterprise E-Commerce</strong>, and <strong className="text-white">AI Startups</strong>. Integrated with Google Gemini 3.8 Flash voice AI and personal performance telemetry.
       </p>
 
-      {/* Primary Action Buttons: Strict 2-Step Gate (1. Verify Gmail ID -> 2. Enter Platform) */}
+      {/* Primary Action Buttons */}
       <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-4 w-full max-w-xl">
         {!isVerified ? (
           <button
@@ -99,7 +92,7 @@ export const LandingView: React.FC<LandingViewProps> = ({
             className="w-full py-4 px-8 rounded-2xl text-sm font-bold text-white bg-gradient-to-r from-[#d47a37] via-[#e08a46] to-[#b85d19] hover:from-[#e59350] hover:to-[#a2480f] shadow-[0_10px_35px_rgba(212,122,55,0.4)] flex items-center justify-center gap-3 transition-all cursor-pointer transform hover:-translate-y-0.5"
           >
             <ShieldCheck className="w-5 h-5 text-amber-200 animate-pulse" />
-            <span>Step 1: Verify Gmail ID</span>
+            <span>Verify Gmail ID (1-Time Setup)</span>
             <ArrowRight className="w-4 h-4" />
           </button>
         ) : (
@@ -111,7 +104,7 @@ export const LandingView: React.FC<LandingViewProps> = ({
               className="w-full py-4 px-8 rounded-2xl text-sm font-bold text-white bg-gradient-to-r from-emerald-600 via-[#d47a37] to-[#b85d19] hover:from-emerald-500 hover:to-[#a2480f] shadow-[0_10px_35px_rgba(16,185,129,0.35)] flex items-center justify-center gap-3 transition-all cursor-pointer transform hover:-translate-y-0.5"
             >
               <Volume2 className="w-4 h-4 text-amber-200 animate-pulse" />
-              <span>Step 2: Enter Platform & Open Dashboard</span>
+              <span>Enter Executive Dashboard & Terminal</span>
               <ArrowRight className="w-4 h-4" />
             </button>
 

@@ -12,9 +12,11 @@ import {
 } from '../utils/userStorage';
 import { getActivityHistory } from '../utils/activityHistory';
 import { playClickSound, playSuccessChime } from '../utils/soundEffects';
+import { compressImageFile } from '../utils/imageCompressor';
 import { CATEGORIES_DATA } from '../data/categoriesData';
 import { calculateUserTenure, TIER_MILESTONES, getTierBadgeStyle } from '../utils/tierSystem';
 import { maskEmail, isPrivilegedAdminEmail } from '../utils/maskEmail';
+import { syncPersonalInformationToFirestore } from '../firebase';
 import {
   User,
   Mail,
@@ -109,6 +111,18 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3000);
     }
+    // Synchronize personal information to Firebase Firestore
+    syncPersonalInformationToFirestore(safeEmail, {
+      age: saved.age,
+      name: saved.name,
+      profession: saved.profession,
+      logo: saved.avatarUrl,
+      avatarUrl: saved.avatarUrl,
+      selectedCategory: saved.selectedCategory,
+      isVip: saved.isVip,
+      role: saved.role,
+      hasEnteredWebsite: true,
+    }).catch(() => {});
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -121,20 +135,18 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
     }
 
     setIsUploading(true);
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const dataUrl = event.target?.result as string;
-      if (dataUrl) {
-        const updated = { ...profile, avatarUrl: dataUrl };
-        persistProfilePermanently(updated, true);
-        playSuccessChime();
-      }
-      setIsUploading(false);
-    };
-    reader.onerror = () => {
-      setIsUploading(false);
-    };
-    reader.readAsDataURL(file);
+    compressImageFile(file, 256, 0.85)
+      .then((dataUrl) => {
+        if (dataUrl) {
+          const updated = { ...profile, avatarUrl: dataUrl };
+          persistProfilePermanently(updated, true);
+          playSuccessChime();
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        setIsUploading(false);
+      });
   };
 
   const handleSave = (e: React.FormEvent) => {

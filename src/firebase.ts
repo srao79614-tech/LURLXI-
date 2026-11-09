@@ -126,42 +126,100 @@ export async function signOutFirebase() {
   }
 }
 
-export async function syncUserProfileToFirestore(user: FirebaseUser, extraData?: { selectedCategory?: string; isVip?: boolean; role?: string }) {
+export interface ExtraUserProfileData {
+  age?: number | string;
+  profession?: string;
+  logo?: string;
+  bio?: string;
+  avatarUrl?: string;
+  selectedCategory?: string;
+  isVip?: boolean;
+  role?: string;
+  hasEnteredWebsite?: boolean;
+}
+
+export async function syncUserProfileToFirestore(
+  user: FirebaseUser,
+  extraData?: ExtraUserProfileData
+) {
   if (!user || !user.uid) return;
   const path = `users/${user.uid}`;
   const cleanEmail = (user.email || '').toLowerCase().trim();
-  const isVipUser =
-    cleanEmail === 'srao79614@gmail.com' ||
-    cleanEmail === 'lurlbusiness7@gmail.com' ||
-    extraData?.isVip === true;
+  const isVipUser = cleanEmail.includes('@gmail.com') || extraData?.isVip === true;
 
   try {
     const userRef = doc(db, 'users', user.uid);
     const existing = await getDoc(userRef);
+    const resolvedRole = isVipUser ? 'VIP Executive Founder' : (extraData?.role || 'Verified Member');
+
+    const payload: Record<string, any> = {
+      uid: user.uid,
+      email: user.email || '',
+      name: user.displayName || user.email?.split('@')[0] || 'Executive Member',
+      avatarUrl: extraData?.avatarUrl || user.photoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=200',
+      selectedCategory: extraData?.selectedCategory || 'trading',
+      isVip: isVipUser,
+      role: resolvedRole,
+      updatedAt: new Date().toISOString(),
+    };
+
+    if (extraData?.age !== undefined) {
+      payload.age = typeof extraData.age === 'string' ? Number(extraData.age) || extraData.age : extraData.age;
+    }
+    if (extraData?.profession) {
+      payload.profession = extraData.profession;
+    }
+    if (extraData?.logo) {
+      payload.logo = extraData.logo;
+    }
+    if (extraData?.bio) {
+      payload.bio = extraData.bio;
+    }
+    if (extraData?.hasEnteredWebsite !== undefined) {
+      payload.hasEnteredWebsite = extraData.hasEnteredWebsite;
+    }
+
     if (!existing.exists()) {
-      await setDoc(userRef, {
-        uid: user.uid,
-        email: user.email || '',
-        name: user.displayName || user.email?.split('@')[0] || 'Executive Member',
-        avatarUrl: user.photoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=200',
-        selectedCategory: extraData?.selectedCategory || 'trading',
-        isVip: isVipUser,
-        role: isVipUser ? 'VIP Executive Founder' : (extraData?.role || 'Verified Member'),
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      });
+      payload.createdAt = new Date().toISOString();
+      await setDoc(userRef, payload);
     } else {
-      const existingIsVip = existing.data()?.isVip === true;
-      const finalIsVip = isVipUser || existingIsVip;
-      await updateDoc(userRef, {
-        name: user.displayName || existing.data()?.name || 'Executive Member',
-        avatarUrl: user.photoURL || existing.data()?.avatarUrl || '',
-        isVip: finalIsVip,
-        role: finalIsVip ? 'VIP Executive Founder' : (existing.data()?.role || 'Verified Member'),
-        updatedAt: new Date().toISOString(),
-      });
+      const existingData = existing.data();
+      const finalIsVip = isVipUser || existingData?.isVip === true;
+      payload.isVip = finalIsVip;
+      if (finalIsVip) {
+        payload.role = 'VIP Executive Founder';
+      }
+      await updateDoc(userRef, payload);
     }
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
+    console.warn('Firestore user profile sync note:', error);
+    // Non-fatal fallback for unauthenticated or local guest modes
+  }
+}
+
+/**
+ * Safely persists full personal profile (Age, Gmail ID, Profession, Logo) to Firebase Firestore
+ */
+export async function syncPersonalInformationToFirestore(
+  targetEmail: string,
+  profileData: {
+    age?: number | string;
+    name?: string;
+    profession?: string;
+    logo?: string;
+    avatarUrl?: string;
+    selectedCategory?: string;
+    isVip?: boolean;
+    role?: string;
+    hasEnteredWebsite?: boolean;
+  }
+) {
+  if (!targetEmail) return;
+  const current = auth.currentUser;
+  if (current) {
+    await syncUserProfileToFirestore(current, {
+      ...profileData,
+      avatarUrl: profileData.logo || profileData.avatarUrl,
+    });
   }
 }

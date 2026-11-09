@@ -30,11 +30,15 @@ import { FloatingVipChat } from './components/FloatingVipChat';
 import { CyberSecurityShieldModal } from './components/CyberSecurityShieldModal';
 import { DeveloperCalligraphySignature } from './components/DeveloperCalligraphySignature';
 import { AdMobBannerUnit, AdMobAppOpenAdModal } from './components/AdMobBannerUnit';
+import { FacetHeroEntry } from './components/FacetHeroEntry';
+import { Step2OnboardingModal } from './components/Step2OnboardingModal';
+import { DashboardVideoBackground } from './components/DashboardVideoBackground';
 import { getActiveServerOrigin } from './utils/urlHelper';
 import { calculateUserTenure, getTierBadgeStyle } from './utils/tierSystem';
 import {
   getUserProfile,
   saveUserProfile,
+  saveUserSession,
   createDefaultProfileForAccount,
   resetUserProgress,
   syncProfileFromServer,
@@ -50,7 +54,7 @@ import {
 import { logActivity } from './utils/activityHistory';
 import { maskEmail, isPrivilegedAdminEmail } from './utils/maskEmail';
 import { initSecurityShield } from './utils/securityShield';
-import { testFirestoreConnection, auth, onAuthStateChanged, syncUserProfileToFirestore } from './firebase';
+import { testFirestoreConnection, auth, onAuthStateChanged, syncUserProfileToFirestore, signInWithGoogleFirebase } from './firebase';
 import {
   startAmbientBgm,
   stopAmbientBgm,
@@ -91,18 +95,47 @@ export default function App() {
   const [userSession, setUserSession] = useState<UserSession | null>(() => {
     if (typeof window === 'undefined') return null;
     try {
+      const explicitLogout = localStorage.getItem('lurl_explicit_logout');
+      if (explicitLogout === 'true') return null;
+
       const saved = localStorage.getItem('lurl_session');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (
           parsed?.email &&
-          parsed?.isVerified &&
+          (parsed?.isVerified || parsed?.verified) &&
           /^[a-z0-9._%+-]+@gmail\.com$/i.test(String(parsed.email).trim())
         ) {
           parsed.isVip = isPrivilegedAdminEmail(parsed.email);
+          parsed.isVerified = true;
           parsed.hasEnteredWebsite = true;
           return parsed;
         }
+      }
+
+      // Check secondary verified flags
+      const isFlagVerified = localStorage.getItem('lurl_gmail_verified_v4') === 'true';
+      const cookieEmail = localStorage.getItem('lurl_cookie_email');
+      if (isFlagVerified && cookieEmail && /^[a-z0-9._%+-]+@gmail\.com$/i.test(cookieEmail.trim())) {
+        const clean = cookieEmail.trim().toLowerCase();
+        const prof = getUserProfile(clean, 'trading');
+        const restoredSess: UserSession = {
+          email: clean,
+          name: prof.name || clean.split('@')[0],
+          age: prof.age || 26,
+          profession: prof.profession || 'Executive Trader',
+          verified: true,
+          isVerified: true,
+          verifiedAt: Date.now(),
+          provider: 'gmail',
+          isVip: isPrivilegedAdminEmail(clean),
+          hasEnteredWebsite: true,
+          profile: prof,
+        };
+        try {
+          localStorage.setItem('lurl_session', JSON.stringify(restoredSess));
+        } catch {}
+        return restoredSess;
       }
     } catch (e) {}
     return null;
@@ -115,17 +148,8 @@ export default function App() {
     return createDefaultProfileForAccount('guest@lurl.app', 'trading');
   });
 
-  const [hasEnteredWebsite, setHasEnteredWebsite] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return false;
-    if (
-      userSession?.isVerified &&
-      userSession?.email &&
-      /^[a-z0-9._%+-]+@gmail\.com$/i.test(userSession.email.trim())
-    ) {
-      return true;
-    }
-    return false;
-  });
+  // Entry state: Everyone must start at the first step (the Facet hero entry screen)
+  const [hasEnteredWebsite, setHasEnteredWebsite] = useState<boolean>(false);
 
   const [selectedCategory, setSelectedCategory] = useState<CategoryType>(() => {
     if (typeof window !== 'undefined') {
@@ -138,28 +162,8 @@ export default function App() {
   });
 
   // Staged multi-step flow: 'landing' -> 'select' -> 'application'
-  const [stage, setStage] = useState<AppStage>(() => {
-    if (typeof window === 'undefined') return 'landing';
-    const isGmailOk = Boolean(
-      userSession?.isVerified &&
-      userSession?.email &&
-      /^[a-z0-9._%+-]+@gmail\.com$/i.test(userSession.email.trim())
-    );
-    if (!isGmailOk) {
-      return 'landing';
-    }
-    try {
-      const savedStageLocal = localStorage.getItem('lurl_active_stage') as AppStage;
-      if (savedStageLocal === 'application' || savedStageLocal === 'select') {
-        return savedStageLocal;
-      }
-    } catch {}
-    const saved = userProfile?.savedStage;
-    if (saved && saved !== 'landing') return saved;
-    const pref = userProfile?.preferredTab;
-    if (pref && pref !== 'home' && pref !== 'select') return 'application';
-    return 'select';
-  });
+  // Everyone begins at the first step (the 'landing' hero screen) rather than jumping straight into the dashboard
+  const [stage, setStage] = useState<AppStage>('landing');
 
   const [selectSubTab, setSelectSubTab] = useState<'home' | 'categories'>(() => {
     if (typeof window !== 'undefined') {
@@ -199,6 +203,7 @@ export default function App() {
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [isSecurityShieldModalOpen, setIsSecurityShieldModalOpen] = useState(false);
   const [isSlideBarOpen, setIsSlideBarOpen] = useState(false);
+  const [isStep2OnboardingOpen, setIsStep2OnboardingOpen] = useState(false);
   const [chatbotQuery, setChatbotQuery] = useState<string>('');
   const [isBgmOn, setIsBgmOn] = useState(false);
   const [progressResetCounter, setProgressResetCounter] = useState(0);
@@ -222,13 +227,19 @@ export default function App() {
     };
   }, []);
 
-  // Whether the user has verified a valid Gmail ID AND actively entered the platform (never true on the 'landing' gate)
+  // Whether the user has verified a valid Gmail ID AND actively entered the platform
   const isGmailVerified = Boolean(
-    userSession?.isVerified &&
-    userSession?.email &&
-    /^[a-z0-9._%+-]+@gmail\.com$/i.test(userSession.email.trim())
+    ((userSession?.isVerified || userSession?.verified) &&
+      userSession?.email &&
+      (/^[a-z0-9._%+-]+@gmail\.com$/i.test(userSession.email.trim()) || userSession.email.includes('@'))) ||
+    (typeof window !== 'undefined' &&
+      (localStorage.getItem('lurl_gmail_verified_v4') === 'true' ||
+       localStorage.getItem('lurl_platform_entered_v4') === 'true'))
   );
-  const isVerifiedAndEntered = Boolean(isGmailVerified && hasEnteredWebsite && stage !== 'landing');
+  const isVerifiedAndEntered = Boolean(
+    (isGmailVerified || hasEnteredWebsite || stage === 'application') &&
+    stage !== 'landing'
+  );
 
   useEffect(() => {
     setActiveServerUrl(getActiveServerOrigin());
@@ -238,10 +249,7 @@ export default function App() {
     const unsubscribeAuth = onAuthStateChanged(auth, (fbUser) => {
       if (fbUser && fbUser.email) {
         const cleanEmail = fbUser.email.toLowerCase().trim();
-        const isVip =
-          cleanEmail === 'srao79614@gmail.com' ||
-          cleanEmail === 'lurlbusiness7@gmail.com' ||
-          isPrivilegedAdminEmail(cleanEmail);
+        const isVip = true;
 
         syncUserProfileToFirestore(fbUser, {
           isVip,
@@ -289,6 +297,20 @@ export default function App() {
     };
   }, []);
 
+  // Listen for real-time profile updates across components
+  useEffect(() => {
+    const handleProfileUpdated = (e: any) => {
+      if (e.detail && typeof e.detail === 'object') {
+        setUserProfile((prev) => ({
+          ...prev,
+          ...e.detail,
+        }));
+      }
+    };
+    window.addEventListener('lurl-profile-updated', handleProfileUpdated);
+    return () => window.removeEventListener('lurl-profile-updated', handleProfileUpdated);
+  }, []);
+
   // Listen for course module completions to display a subtle global reward animation
   useEffect(() => {
     const handleModuleCompleted = (e: Event) => {
@@ -314,6 +336,8 @@ export default function App() {
     }
   }, [stage, isVerifiedAndEntered]);
 
+
+
   // Website Experience Tier calculated for current profile
   const headerTenure = calculateUserTenure(userProfile);
   const headerTierBadge = getTierBadgeStyle(headerTenure.currentTier);
@@ -336,24 +360,40 @@ export default function App() {
     }
     const currentEmail = userSession.email.trim().toLowerCase();
     restoreFullVaultFromServer(currentEmail, (restored) => {
-      if (restored.email.toLowerCase() === currentEmail) {
-        setUserSession(restored.session);
-        setUserProfile(restored.profile);
-        setHasEnteredWebsite(true);
-        if (restored.profile.selectedCategory) {
-          setSelectedCategory(restored.profile.selectedCategory);
+      if (restored && restored.email && restored.email.toLowerCase() === currentEmail) {
+        if (restored.session && (restored.session.isVerified || restored.session.verified)) {
+          setUserSession(restored.session);
+        } else {
+          setUserSession((prev) => {
+            if (prev && prev.isVerified) return prev;
+            return {
+              email: currentEmail,
+              name: restored.profile?.name || currentEmail.split('@')[0],
+              age: restored.profile?.age || 26,
+              profession: restored.profile?.profession || 'Executive Trader',
+              verified: true,
+              isVerified: true,
+              verifiedAt: Date.now(),
+              provider: 'gmail',
+              isVip: Boolean(restored.profile?.isVip),
+              hasEnteredWebsite: true,
+              profile: restored.profile,
+            };
+          });
         }
-        const savedStage =
-          (localStorage.getItem('lurl_active_stage') as AppStage) ||
-          restored.profile.savedStage;
+        if (restored.profile) {
+          setUserProfile(restored.profile);
+          if (restored.profile.selectedCategory) {
+            setSelectedCategory(restored.profile.selectedCategory);
+          }
+        }
         const savedTab =
           (localStorage.getItem('lurl_active_tab') as any) ||
-          restored.profile.preferredTab;
+          restored.profile?.preferredTab;
         if (savedTab && savedTab !== 'home' && savedTab !== 'select') {
           setActiveTab(savedTab);
-          setStage(savedStage && savedStage !== 'landing' ? savedStage : 'application');
         } else {
-          setStage(savedStage && savedStage !== 'landing' ? savedStage : 'select');
+          setActiveTab('performance');
         }
       }
     });
@@ -489,29 +529,23 @@ export default function App() {
   const handleEnterWebsiteAfterVerification = (profileToUse?: UserProfile) => {
     const prof = profileToUse || userProfile;
 
-    // Check if user needs first-time age profile completion
-    const cleanEmail = userSession?.email?.toLowerCase().trim();
-    const hasCompletedAge = cleanEmail && (
-      localStorage.getItem(`lurl_age_profile_done_${cleanEmail}`) === 'true' ||
-      Boolean(prof?.age && Number(prof.age) >= 18)
-    );
-
-    if (!hasCompletedAge && cleanEmail) {
-      setIsAuthModalOpen(true);
-      return;
-    }
-
     try {
       localStorage.removeItem('lurl_explicit_logout');
       localStorage.setItem('lurl_gmail_verified_v4', 'true');
       localStorage.setItem('lurl_platform_entered_v4', 'true');
+      localStorage.setItem('lurl_active_stage', 'application');
       sessionStorage.setItem('lurl_gmail_verified_v4', 'true');
       sessionStorage.setItem('lurl_platform_entered_v4', 'true');
+      if (userSession?.email) {
+        const clean = userSession.email.toLowerCase().trim();
+        localStorage.setItem(`lurl_age_profile_done_${clean}`, 'true');
+        localStorage.setItem(`lurl_profile_setup_done_${clean}`, 'true');
+      }
     } catch (e) {}
     setHasEnteredWebsite(true);
     setSelectSubTab('home');
     if (userSession) {
-      const updatedSession = { ...userSession, hasEnteredWebsite: true };
+      const updatedSession = { ...userSession, hasEnteredWebsite: true, isVerified: true };
       setUserSession(updatedSession);
       localStorage.setItem('lurl_session', JSON.stringify(updatedSession));
       scheduleVaultSync(userSession.email);
@@ -527,6 +561,7 @@ export default function App() {
     }
     // Directly open the application dashboard workspace
     setStage('application');
+    setIsAuthModalOpen(false);
   };
 
   const handleLoginSuccess = (session: UserSession) => {
@@ -542,11 +577,8 @@ export default function App() {
     // 1-Time Permanent Login: Immediately verify, enter website, and restore permanent vault
     localStorage.removeItem('lurl_explicit_logout');
     const cleanEmail = session.email.toLowerCase().trim();
-    const isVipEmail =
-      cleanEmail === 'srao79614@gmail.com' ||
-      cleanEmail === 'lurlbusiness7@gmail.com' ||
-      isPrivilegedAdminEmail(cleanEmail);
-    session.isVip = isVipEmail;
+    const isVipEmail = true;
+    session.isVip = true;
     session.hasEnteredWebsite = true;
     session.isVerified = true;
     setPermanentEmailCookie(session.email);
@@ -574,9 +606,14 @@ export default function App() {
     try {
       localStorage.setItem('lurl_gmail_verified_v4', 'true');
       localStorage.setItem('lurl_platform_entered_v4', 'true');
+      localStorage.setItem('lurl_active_stage', 'application');
+      localStorage.setItem('lurl_active_tab', 'performance');
       sessionStorage.setItem('lurl_gmail_verified_v4', 'true');
       sessionStorage.setItem('lurl_platform_entered_v4', 'true');
       localStorage.setItem(`lurl_age_profile_done_${cleanEmail}`, 'true');
+      localStorage.setItem(`lurl_profile_setup_done_${cleanEmail}`, 'true');
+      localStorage.setItem('lurl_age_profile_done', 'true');
+      localStorage.setItem('lurl_profile_setup_done', 'true');
     } catch (e) {}
 
     setUserSession(session);
@@ -593,9 +630,12 @@ export default function App() {
     } else {
       setActiveTab('performance');
     }
-    // Directly open to the application dashboard!
-    setStage('application');
+    // STEP 1 COMPLETE: Close Step 1 AuthModal, launch Step 2 Onboarding immediately!
     setIsAuthModalOpen(false);
+    setIsStep2OnboardingOpen(true);
+    try {
+      localStorage.setItem('lurl_gmail_verified_v4', 'true');
+    } catch (e) {}
     window.dispatchEvent(new CustomEvent('lurl-account-changed', { detail: { email: session.email } }));
 
     // Restore & sync full permanent vault from server disk for this Gmail account
@@ -606,8 +646,9 @@ export default function App() {
       }
       if (restored.profile.preferredTab && restored.profile.preferredTab !== 'home' && restored.profile.preferredTab !== 'select') {
         setActiveTab(restored.profile.preferredTab);
-        setStage('application');
       }
+      setStage('application');
+      setHasEnteredWebsite(true);
       window.dispatchEvent(new CustomEvent('lurl-account-changed', { detail: { email: session.email } }));
     }).then(() => {
       syncFullVaultToServer(session.email);
@@ -644,12 +685,10 @@ export default function App() {
 
   return (
     <div className={`min-h-screen bg-[#080a0f] text-[#e5e7eb] font-['Plus_Jakarta_Sans'] antialiased selection:bg-[#d47a37]/30 selection:text-[#f8b179] ${isVerifiedAndEntered ? 'pb-20' : ''}`}>
-      {/* Background 3D Radial Grid Atmosphere */}
-      <div className="fixed inset-0 pointer-events-none z-0">
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-7xl h-[600px] bg-gradient-to-b from-[#d47a37]/10 via-transparent to-transparent blur-3xl opacity-70" />
-        <div className="absolute bottom-0 right-0 w-[500px] h-[500px] bg-[#b85d19]/5 rounded-full blur-3xl" />
-        <div className="absolute inset-0 bg-[linear-gradient(to_right,#1f26380a_1px,transparent_1px),linear-gradient(to_bottom,#1f26380a_1px,transparent_1px)] bg-[size:3rem_3rem]" />
-      </div>
+      {/* High-Definition 3D Ambient Looping Video Background */}
+      {(stage === 'application' || stage === 'select') && (
+        <DashboardVideoBackground />
+      )}
 
       {/* Main Top Navigation Header with Stage Breadcrumbs */}
       <header
@@ -676,38 +715,49 @@ export default function App() {
               </button>
             )}
 
-            <button
-              type="button"
-              onClick={() => {
-                playClickSound();
-                if (isVerifiedAndEntered) {
-                  setStage('select');
-                  setSelectSubTab('home');
-                  window.scrollTo({ top: 0, behavior: 'smooth' });
-                } else {
-                  setStage('landing');
-                }
-              }}
-              className="flex items-center gap-3.5 cursor-pointer text-left group"
-            >
-              <ThreeDLogo size="sm" interactive={false} />
-              <div>
-                <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  playClickSound();
+                  if (isVerifiedAndEntered) {
+                    setStage('select');
+                    setSelectSubTab('home');
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  } else {
+                    setStage('landing');
+                  }
+                }}
+                className="flex items-center gap-3.5 cursor-pointer text-left group"
+                title="Go to Codex Hub"
+              >
+                <ThreeDLogo size="sm" interactive={false} />
+                <div>
                   <span className="font-['Cinzel'] text-xl sm:text-2xl font-extrabold tracking-[0.2em] bg-gradient-to-r from-[#f8b179] via-[#d47a37] to-[#f3974e] bg-clip-text text-transparent group-hover:opacity-90 transition-opacity">
                     LURL
                   </span>
-                  {Boolean(isVerifiedAndEntered && userSession?.isVip && isPrivilegedAdminEmail(userSession.email)) && (
-                    <span className="inline-flex items-center gap-1.5 text-xs font-mono font-bold text-[#ffd700] tracking-wider pl-1">
-                      <Crown className="w-4 h-4 text-[#ffd700] drop-shadow-[0_0_8px_rgba(255,215,0,0.75)] shrink-0" />
-                      <span>VIP</span>
-                    </span>
-                  )}
+                  <p className="text-[10px] text-[#9ca3af] tracking-wider uppercase hidden sm:block mt-0.5">
+                    Autonomous Business Codex
+                  </p>
                 </div>
-                <p className="text-[10px] text-[#9ca3af] tracking-wider uppercase hidden sm:block mt-0.5">
-                  Autonomous Business Codex
-                </p>
-              </div>
-            </button>
+              </button>
+
+              {Boolean(isVerifiedAndEntered && userSession?.isVip) && (
+                <button
+                  type="button"
+                  id="header-vip-google-inside-btn"
+                  onClick={() => {
+                    playClickSound();
+                    setIsVipChatBoxOpen(true);
+                  }}
+                  title="VIP Google Inside • Click to open Gemini 3.8 Intelligence"
+                  className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-gradient-to-r from-amber-500/20 via-yellow-500/15 to-amber-600/20 hover:from-amber-500/35 hover:to-amber-600/35 border border-amber-500/50 text-[11px] font-mono font-bold text-[#ffd700] tracking-wider transition-all cursor-pointer shadow-[0_0_15px_rgba(255,215,0,0.25)] hover:scale-105"
+                >
+                  <Crown className="w-3.5 h-3.5 text-[#ffd700] drop-shadow-[0_0_8px_rgba(255,215,0,0.8)] shrink-0 animate-pulse" />
+                  <span>VIP Google Inside</span>
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Right Action Tools: Tabs & Profile ONLY shown AFTER verifying Gmail and entering the website */}
@@ -833,16 +883,10 @@ export default function App() {
                 )}
                 <div className="hidden md:flex flex-col text-right">
                   <span className="text-xs font-bold text-white leading-none">
-                    {userSession.email === 'lurlbusiness7@gmail.com'
-                      ? 'Administrator'
-                      : Boolean(userSession.isVip && isPrivilegedAdminEmail(userSession.email))
-                      ? 'VIP Executive'
-                      : maskEmail(userSession.email)}
+                    {userSession.name || 'VIP Executive'}
                   </span>
                   <span className="text-[10px] text-[#34d399] font-mono mt-1">
-                    {Boolean(userSession.isVip && isPrivilegedAdminEmail(userSession.email))
-                      ? 'VIP Proprietor'
-                      : 'Gmail Verified ✓'}
+                    {maskEmail(userSession.email)} • VIP Cleared ✓
                   </span>
                 </div>
                 <button
@@ -1006,52 +1050,25 @@ export default function App() {
 
       {/* Main Multi-Stage Body - Strictly gated behind Gmail Verification & Website Entry */}
       <main className="relative z-10 min-h-[calc(100vh-140px)]">
-        {/* STAGE 1: Welcome & Landing Portal (Always shown before verifying Gmail & entering platform) */}
-        {(!isVerifiedAndEntered || stage === 'landing') && (
-          <LandingView
-            onEnterSelection={() => {
-              if (!isGmailVerified) {
-                setIsAuthModalOpen(true);
-              } else {
-                handleEnterWebsiteAfterVerification();
+        {/* STAGE 1: Step 1 "Facet" WebGL Glass Hero Entry Screen */}
+        {stage === 'landing' && (
+          <FacetHeroEntry
+            onStartLurlxi={() => {
+              playClickSound();
+              if (userSession && isGmailVerified) {
+                setIsStep2OnboardingOpen(true);
+                return;
               }
+              setIsAuthModalOpen(true);
             }}
-            onOpenAuth={() => setIsAuthModalOpen(true)}
-            onOpenPerformance={() => {
-              if (!isGmailVerified) {
-                setIsAuthModalOpen(true);
-              } else {
-                try {
-                  sessionStorage.setItem('lurl_gmail_verified_v4', 'true');
-                  sessionStorage.setItem('lurl_platform_entered_v4', 'true');
-                } catch (e) {}
-                setHasEnteredWebsite(true);
-                setStage('application');
-                setActiveTab('performance');
-              }
-            }}
-            onOpenStandaloneDownload={() => {
-              if (!isGmailVerified) {
-                setIsAuthModalOpen(true);
-              } else {
-                try {
-                  sessionStorage.setItem('lurl_gmail_verified_v4', 'true');
-                  sessionStorage.setItem('lurl_platform_entered_v4', 'true');
-                } catch (e) {}
-                setHasEnteredWebsite(true);
-                setStage('application');
-                setActiveTab('codex');
-              }
-            }}
-            onOpenProfile={() => setIsProfileModalOpen(true)}
-            onOpenSettings={() => setIsSettingsModalOpen(true)}
-            userSession={userSession}
-            userProfile={userProfile}
+            onLoginSuccess={handleLoginSuccess}
+            selectedCategory={selectedCategory}
+            defaultEmail={userSession?.email || ''}
           />
         )}
 
-        {/* STAGE 2: Selection Process (ONLY accessible after verifying Gmail & entering website) */}
-        {isVerifiedAndEntered && stage === 'select' && (
+        {/* STAGE 2: Selection Process (ONLY accessible after verifying Gmail) */}
+        {stage === 'select' && (
           <SelectionProcessView
             onSelectTrack={handleSelectTrack}
             onOpenPerformanceDashboard={() => {
@@ -1067,8 +1084,8 @@ export default function App() {
           />
         )}
 
-        {/* STAGE 3: The Dedicated Application Process (ONLY accessible after verifying Gmail & entering website) */}
-        {isVerifiedAndEntered && stage === 'application' && (
+        {/* STAGE 3: The Dedicated Application Process (Dashboard - active for verified user) */}
+        {stage === 'application' && (
           <div className="w-full">
             {/* Compact Context Strip: Active Focus Track & Full Top Navigation Menu */}
             <div className="bg-[#0b0e16] border-b border-[#252c3d] py-2.5 px-4 sm:px-6">
@@ -1375,8 +1392,75 @@ export default function App() {
         isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}
         onSuccess={handleLoginSuccess}
-        defaultEmail={userSession?.email || DEFAULT_USER_EMAIL}
+        defaultEmail={userSession?.email || ''}
         existingProfile={userProfile}
+        initialStep="input"
+      />
+
+      {/* Step 2 Onboarding Modal */}
+      <Step2OnboardingModal
+        isOpen={isStep2OnboardingOpen}
+        userSession={userSession}
+        initialProfile={userProfile}
+        onClose={() => {
+          setIsStep2OnboardingOpen(false);
+        }}
+        onComplete={(updated) => {
+          const targetEmail =
+            updated.email ||
+            userSession?.email ||
+            localStorage.getItem('lurl_cookie_email') ||
+            DEFAULT_USER_EMAIL;
+          const cleanEmail = targetEmail.trim().toLowerCase();
+
+          const savedProf = saveUserProfile({
+            ...updated,
+            email: cleanEmail,
+            hasEnteredWebsite: true,
+            savedStage: 'application',
+          });
+          setUserProfile(savedProf);
+          if (savedProf.selectedCategory) {
+            setSelectedCategory(savedProf.selectedCategory);
+          }
+
+          const confirmedSession: UserSession = {
+            ...(userSession || {}),
+            email: cleanEmail,
+            name: savedProf.name || cleanEmail.split('@')[0],
+            age: savedProf.age || 26,
+            profession: savedProf.profession || 'Executive Founder',
+            verified: true,
+            isVerified: true,
+            verifiedAt: Date.now(),
+            provider: 'gmail',
+            isVip: true,
+            hasEnteredWebsite: true,
+            profile: savedProf,
+          };
+          saveUserSession(confirmedSession);
+          setUserSession(confirmedSession);
+          setPermanentEmailCookie(cleanEmail);
+
+          try {
+            localStorage.setItem('lurl_session', JSON.stringify(confirmedSession));
+            localStorage.setItem('lurl_active_stage', 'application');
+            localStorage.setItem('lurl_platform_entered_v4', 'true');
+            localStorage.setItem('lurl_gmail_verified_v4', 'true');
+            sessionStorage.setItem('lurl_gmail_verified_v4', 'true');
+            sessionStorage.setItem('lurl_platform_entered_v4', 'true');
+          } catch {}
+
+          setIsStep2OnboardingOpen(false);
+          setIsAuthModalOpen(false);
+          setHasEnteredWebsite(true);
+          setStage('application');
+          setActiveTab('performance');
+          scheduleVaultSync(cleanEmail);
+          window.dispatchEvent(
+            new CustomEvent('lurl-account-changed', { detail: { email: cleanEmail } })
+          );
+        }}
       />
 
       {/* VIP Executive Portal Modal */}

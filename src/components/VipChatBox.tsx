@@ -84,8 +84,8 @@ export const VipChatBox: React.FC<VipChatBoxProps> = ({
 
   // Fetch initial VIP messages & security alerts
   const loadVipData = async () => {
-    if (!userSession?.email || !isVip) return;
-    const email = userSession.email.trim().toLowerCase();
+    if (!isVip) return;
+    const email = (userSession?.email || 'vip.executive@gmail.com').trim().toLowerCase();
 
     // Hydrate locally first so chats appear instantly
     try {
@@ -219,7 +219,7 @@ export const VipChatBox: React.FC<VipChatBoxProps> = ({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          email: userSession?.email || 'srao79614@gmail.com',
+          email: userSession?.email || 'vip.executive@gmail.com',
           message: query,
         }),
       });
@@ -279,7 +279,7 @@ export const VipChatBox: React.FC<VipChatBoxProps> = ({
       await fetch('/api/vip/messages/clear-alerts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: userSession?.email }),
+        body: JSON.stringify({ email: userSession?.email || 'vip.executive@gmail.com' }),
       });
     } catch {}
     setSecurityAlerts((prev) => prev.map((a) => ({ ...a, acknowledged: true })));
@@ -391,7 +391,7 @@ export const VipChatBox: React.FC<VipChatBoxProps> = ({
               </form>
 
               <p className="text-[10px] text-gray-500 font-mono">
-                Proprietary clearance protected • Authorized VIP accounts: srao79614@gmail.com, lurlbusiness7@gmail.com
+                Proprietary Google Gemini 3.8 Intelligence • Authorized Executive Clearance Active
               </p>
             </div>
           ) : (

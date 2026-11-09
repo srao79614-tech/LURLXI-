@@ -47,9 +47,9 @@ export interface ChapterBookPageData {
   keyAxiom: string;
 }
 
-export const PAGES_PER_CHAPTER = 500;
+export const PAGES_PER_CHAPTER = 9500; // 9,000+ pages per chapter
 export const CHAPTERS_PER_CATEGORY = 15;
-export const TOTAL_PAGES_PER_CATEGORY = PAGES_PER_CHAPTER * CHAPTERS_PER_CATEGORY; // 7,500 pages
+export const TOTAL_PAGES_PER_CATEGORY = PAGES_PER_CHAPTER * CHAPTERS_PER_CATEGORY; // 142,500 pages per category (700,000+ platform-wide)
 
 interface DomainCorpusData {
   subDisciplines: string[];
