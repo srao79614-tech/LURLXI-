@@ -7,14 +7,14 @@ import { WebSocketServer, WebSocket } from "ws";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
-import { getStandaloneHtmlContent } from "./src/standaloneHtmlSource";
-import { getStandaloneCssContent } from "./src/standaloneCssSource";
-import { CategoryType } from "./src/types";
+import { getStandaloneHtmlContent } from "./src/standaloneHtmlSource.ts";
+import { getStandaloneCssContent } from "./src/standaloneCssSource.ts";
+import type { CategoryType } from "./src/types.ts";
 
 dotenv.config();
 
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 interface ServerVipSecurityAlert {
   id: string;
@@ -4018,7 +4018,7 @@ async function startServer() {
   } else {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
-    app.get("*", (req, res) => {
+    app.use((req, res) => {
       res.sendFile(path.join(distPath, "index.html"));
     });
   }
